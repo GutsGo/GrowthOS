@@ -343,6 +343,31 @@ export default function Home() {
         </AnimatePresence>
       </main>
 
+      {/* 移动端底部导航栏 (Mobile Bottom Nav) - 专注模式下隐藏 */}
+      {!isFullScreenMode && (
+        <nav className="fixed bottom-0 left-0 right-0 h-16 z-40 bg-surface-1/90 backdrop-blur-md border-t border-border-subtle flex items-center justify-around px-2 md:hidden">
+          {navLinks.map((link) => {
+            const isActive = activeTab === link.tab;
+            return (
+              <button
+                key={link.tab}
+                onClick={() => setActiveTab(link.tab)}
+                className={`flex flex-col items-center justify-center flex-1 py-1 gap-1 transition-all duration-200 ${
+                  isActive ? "text-primary" : "text-text-secondary hover:text-text-primary"
+                }`}
+              >
+                <span className={`transition-transform duration-200 ${isActive ? "scale-110 text-primary" : "text-text-secondary"}`}>
+                  {link.icon}
+                </span>
+                <span className="text-[9px] font-medium tracking-tight truncate max-w-[60px]">
+                  {link.label.replace("今日", "").replace("与输出", "").replace("AI ", "")}
+                </span>
+              </button>
+            );
+          })}
+        </nav>
+      )}
+
       {/* 全局命令面板 (Command Palette) */}
       <CommandPalette onTriggerWoopModal={() => setIsWoopModalOpen(true)} />
     </div>
