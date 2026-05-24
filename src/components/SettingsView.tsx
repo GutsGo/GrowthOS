@@ -324,7 +324,7 @@ export default function SettingsView() {
 
             <button
               type="submit"
-              className="w-full py-2 bg-primary hover:bg-primary-hover text-primary-text transition-all rounded-full text-xs font-bold uppercase tracking-widest"
+              className="w-full py-2 bg-primary hover:bg-primary-hover text-primary-text transition-all duration-200 rounded-xl text-xs font-bold uppercase tracking-widest active:scale-95"
             >
               保存原子习惯
             </button>
@@ -376,14 +376,14 @@ export default function SettingsView() {
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
                       placeholder="name@example.com"
-                      className="w-full pl-7 pr-3 py-1.5 bg-surface-2 rounded-lg text-xs text-text-primary border border-border-subtle focus:border-primary outline-none font-mono"
+                      className="w-full pl-7 pr-3 py-1.5 bg-surface-2 rounded-xl text-xs text-text-primary border border-border-subtle focus:border-primary outline-none font-mono"
                     />
                     <Mail className="w-3.5 h-3.5 text-neutral-gray absolute left-2" />
                   </div>
                   <button
                     type="submit"
                     disabled={isSendingLink}
-                    className="bg-primary hover:bg-primary-hover text-black px-3 py-1.5 rounded-lg text-[10px] font-bold transition-all uppercase tracking-wider flex items-center gap-1"
+                    className="bg-primary hover:bg-primary-hover text-black px-3 py-1.5 rounded-xl text-[10px] font-bold transition-all duration-200 uppercase tracking-wider flex items-center gap-1 active:scale-95"
                   >
                     {isSendingLink ? (
                       <span className="w-3 h-3 border-2 border-black/20 border-t-black rounded-full animate-spin" />
@@ -430,7 +430,7 @@ export default function SettingsView() {
                 <button
                   type="button"
                   onClick={handleCloudSync}
-                  className="w-full py-2 bg-surface-3 hover:bg-primary hover:text-black transition-all duration-200 rounded-lg text-[10px] font-bold uppercase tracking-wider flex items-center justify-center gap-1.5 border border-border-subtle"
+                  className="w-full py-2 bg-surface-3 hover:bg-primary hover:text-black transition-all duration-200 rounded-xl text-[10px] font-bold uppercase tracking-wider flex items-center justify-center gap-1.5 border border-border-subtle active:scale-95"
                 >
                   <Database className="w-3.5 h-3.5" />
                   <span>与 Supabase 云端 PostgreSQL 同步</span>
