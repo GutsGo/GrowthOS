@@ -515,7 +515,7 @@ export default function BrainView() {
               setSelectedCardId(null);
               setBrainSubTab("editor"); // 点击新建自动切到编辑
             }}
-            className="w-full flex items-center justify-center gap-2 py-2 rounded-xl bg-surface-1 border border-border-subtle hover:border-primary text-xs font-bold transition-all duration-200 text-text-primary active:scale-95"
+            className="w-full flex items-center justify-center gap-2 py-2 rounded-lg bg-surface-1 border border-border-subtle hover:border-primary text-xs font-bold transition-all duration-200 text-text-primary active:scale-95"
           >
             <Plus className="w-4 h-4 text-primary" />
             <span>新建记忆卡片</span>
@@ -578,7 +578,7 @@ export default function BrainView() {
                     type="button"
                     disabled={!selectedText || isExtracting}
                     onClick={handleExtractCards}
-                    className={`px-4 py-2 rounded-xl text-[11px] font-bold uppercase tracking-wider flex items-center gap-1.5 transition-all duration-200 relative active:scale-95 ${
+                    className={`px-4 py-2 rounded-lg text-[11px] font-bold uppercase tracking-wider flex items-center gap-1.5 transition-all duration-200 relative active:scale-95 ${
                       selectedText && !isExtracting
                         ? "bg-ai-blue text-white shadow-[0_0_15px_rgba(59,130,246,0.3)] hover:scale-[1.02] hover:shadow-[0_0_20px_rgba(59,130,246,0.5)]"
                         : "bg-surface-3 text-text-secondary cursor-not-allowed"
@@ -629,7 +629,7 @@ export default function BrainView() {
           <div className="flex gap-3 pt-2">
             <button
               type="submit"
-              className="flex-1 py-2.5 bg-primary hover:bg-primary-hover text-primary-text transition-all duration-200 rounded-xl text-xs font-bold uppercase tracking-widest active:scale-95"
+              className="flex-1 py-2.5 bg-primary hover:bg-primary-hover text-primary-text transition-all duration-200 rounded-lg text-xs font-bold uppercase tracking-widest active:scale-95"
             >
               {selectedCardId ? "保存修改" : "保存至第二大脑"}
             </button>
@@ -643,7 +643,7 @@ export default function BrainView() {
                 if (editor) editor.commands.clearContent();
                 setBrainSubTab("list"); // 取消返回列表
               }}
-              className="px-6 bg-surface-3 hover:bg-surface-2 border border-border-subtle transition-all duration-200 rounded-xl text-xs font-semibold active:scale-95"
+              className="px-6 bg-surface-3 hover:bg-surface-2 border border-border-subtle transition-all duration-200 rounded-lg text-xs font-semibold active:scale-95"
             >
               取消
             </button>

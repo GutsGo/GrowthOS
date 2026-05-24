@@ -615,9 +615,9 @@ export default function DashboardView({
             <button
               onClick={handleStartReview}
               disabled={overdueCardsCount === 0}
-              className={`w-full py-2.5 rounded-xl font-bold text-xs uppercase tracking-widest flex items-center justify-center gap-2 transition-all duration-200 active:scale-95 ${
+              className={`w-full py-2.5 rounded-lg font-bold text-xs uppercase tracking-widest flex items-center justify-center gap-2 transition-all duration-200 active:scale-95 ${
                 overdueCardsCount > 0
-                  ? "bg-primary text-primary-text hover:bg-primary-hover hover:scale-[1.02]"
+                  ? "bg-primary text-primary-text hover:bg-primary-hover"
                   : "bg-surface-3 text-text-secondary cursor-not-allowed"
               }`}
             >
@@ -647,13 +647,13 @@ export default function DashboardView({
             <div className="flex gap-2 pt-2 z-10">
               <button
                 onClick={handleAcceptChallenge}
-                className="flex-1 bg-primary hover:bg-primary-hover text-black transition-all duration-200 py-2 rounded-xl text-xs font-bold uppercase tracking-wider active:scale-95"
+                className="flex-1 bg-primary hover:bg-primary-hover text-black transition-all duration-200 py-2 rounded-lg text-xs font-bold uppercase tracking-wider active:scale-95"
               >
                 接受挑战 (15m)
               </button>
               <button
                 onClick={() => {}}
-                className="px-4 bg-surface-3/50 hover:bg-surface-2 border border-border-subtle transition-all duration-200 py-2 rounded-xl text-xs text-text-secondary active:scale-95"
+                className="px-4 bg-surface-3/50 hover:bg-surface-2 border border-border-subtle transition-all duration-200 py-2 rounded-lg text-xs text-text-secondary active:scale-95"
               >
                 忽略
               </button>
@@ -734,13 +734,13 @@ export default function DashboardView({
                     <div className="flex gap-2 pt-1">
                       <button
                         onClick={handleSubmitReview}
-                        className="flex-1 bg-primary hover:bg-primary-hover text-black transition-all duration-200 py-2 rounded-xl text-xs font-bold uppercase tracking-wider active:scale-95"
+                        className="flex-1 bg-primary hover:bg-primary-hover text-black transition-all duration-200 py-2 rounded-lg text-xs font-bold uppercase tracking-wider active:scale-95"
                       >
                         提交今日反思
                       </button>
                       <button
                         onClick={() => setIsReviewing(false)}
-                        className="px-4 bg-surface-3 hover:bg-surface-2 transition-all duration-200 py-2 rounded-xl text-xs text-text-secondary active:scale-95"
+                        className="px-4 bg-surface-3 hover:bg-surface-2 transition-all duration-200 py-2 rounded-lg text-xs text-text-secondary active:scale-95"
                       >
                         取消
                       </button>
@@ -777,7 +777,7 @@ export default function DashboardView({
                 </p>
                 <button
                   onClick={handleStartReviewFlow}
-                  className={`w-full py-2.5 rounded-xl font-bold text-xs uppercase tracking-widest flex items-center justify-center gap-2 transition-all duration-200 active:scale-95 ${
+                  className={`w-full py-2.5 rounded-lg font-bold text-xs uppercase tracking-widest flex items-center justify-center gap-2 transition-all duration-200 active:scale-95 ${
                     isAfterReviewTime
                       ? "bg-primary text-black hover:scale-[1.02] shadow-[0_0_12px_rgba(29,185,84,0.3)]"
                       : "bg-surface-3 text-text-secondary hover:bg-surface-2"
@@ -924,7 +924,7 @@ export default function DashboardView({
 
                 <button
                   type="submit"
-                  className="w-full py-2.5 mt-2 bg-primary hover:bg-primary-hover transition-all duration-200 rounded-xl text-primary-text text-xs font-bold uppercase tracking-widest active:scale-95"
+                  className="w-full py-2.5 mt-2 bg-primary hover:bg-primary-hover transition-all duration-200 rounded-lg text-primary-text text-xs font-bold uppercase tracking-widest active:scale-95"
                 >
                   保存今日意图
                 </button>

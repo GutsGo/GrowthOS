@@ -385,7 +385,7 @@ export default function FlowView() {
                     setReviewMode(false);
                     setActiveTab("dashboard");
                   }}
-                  className="bg-primary hover:bg-primary-hover text-primary-text font-bold text-xs uppercase tracking-widest px-6 py-2.5 rounded-xl transition-all duration-200 active:scale-95"
+                  className="bg-primary hover:bg-primary-hover text-primary-text font-bold text-xs uppercase tracking-widest px-6 py-2.5 rounded-lg transition-all duration-200 active:scale-95"
                 >
                   回到指挥舱
                 </button>
@@ -453,19 +453,19 @@ export default function FlowView() {
                       >
                         <button
                           onClick={() => handleSM2Rating(1)}
-                          className="bg-surface-1 border border-border-subtle hover:border-error hover:text-error transition-all py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider"
+                          className="bg-surface-1 border border-border-subtle hover:border-error hover:text-error transition-all duration-200 py-2.5 rounded-lg text-xs font-bold uppercase tracking-wider active:scale-95"
                         >
                           忘记 (Again)
                         </button>
                         <button
                           onClick={() => handleSM2Rating(3)}
-                          className="bg-surface-1 border border-border-subtle hover:border-amber-500 hover:text-amber-500 transition-all py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider"
+                          className="bg-surface-1 border border-border-subtle hover:border-amber-500 hover:text-amber-500 transition-all duration-200 py-2.5 rounded-lg text-xs font-bold uppercase tracking-wider active:scale-95"
                         >
                           吃力 (Hard)
                         </button>
                         <button
                           onClick={() => handleSM2Rating(5)}
-                          className="bg-primary hover:bg-primary-hover text-primary-text transition-all py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider"
+                          className="bg-primary hover:bg-primary-hover text-primary-text transition-all duration-200 py-2.5 rounded-lg text-xs font-bold uppercase tracking-wider active:scale-95"
                         >
                           轻松 (Good)
                         </button>
@@ -499,7 +499,7 @@ export default function FlowView() {
               <div className="flex items-center gap-3 w-full">
                 <button
                   onClick={toggleTimer}
-                  className={`flex-1 py-2.5 rounded-xl font-bold text-xs uppercase tracking-widest flex items-center justify-center gap-2 transition-all duration-200 active:scale-95 ${
+                  className={`flex-1 py-2.5 rounded-lg font-bold text-xs uppercase tracking-widest flex items-center justify-center gap-2 transition-all duration-200 active:scale-95 ${
                     isActive
                       ? "bg-surface-2 border border-border-subtle text-text-primary hover:bg-surface-3"
                       : "bg-primary text-primary-text hover:bg-primary-hover hover:scale-[1.02]"
@@ -656,7 +656,7 @@ export default function FlowView() {
                   disabled={
                     !feynmanTopic || !feynmanContent || isFeynmanAnalysing
                   }
-                  className={`w-full py-2.5 rounded-xl font-bold text-xs uppercase tracking-widest flex items-center justify-center gap-2 transition-all duration-200 active:scale-95 ${
+                  className={`w-full py-2.5 rounded-lg font-bold text-xs uppercase tracking-widest flex items-center justify-center gap-2 transition-all duration-200 active:scale-95 ${
                     !feynmanTopic || !feynmanContent || isFeynmanAnalysing
                       ? "bg-surface-3 text-text-secondary cursor-not-allowed"
                       : "bg-primary text-primary-text hover:bg-primary-hover hover:scale-[1.02]"
