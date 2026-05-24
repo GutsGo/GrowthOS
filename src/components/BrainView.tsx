@@ -57,6 +57,7 @@ export default function BrainView() {
   const editor = useEditor({
     extensions: [StarterKit],
     content: "",
+    immediatelyRender: false,
     onUpdate: ({ editor }) => {
       setBack(editor.getHTML());
     },
