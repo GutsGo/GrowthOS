@@ -52,14 +52,19 @@ export default function FlowView() {
   // Web Audio API 警报蜂鸣音合成器
   const playBeepAlert = () => {
     try {
-      const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const audioCtx = new (
+        window.AudioContext || (window as any).webkitAudioContext
+      )();
       const playTone = (delay: number, duration: number, freq: number) => {
         const osc = audioCtx.createOscillator();
         const gain = audioCtx.createGain();
         osc.type = "sine";
         osc.frequency.setValueAtTime(freq, audioCtx.currentTime + delay);
         gain.gain.setValueAtTime(0.15, audioCtx.currentTime + delay);
-        gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + delay + duration);
+        gain.gain.exponentialRampToValueAtTime(
+          0.001,
+          audioCtx.currentTime + delay + duration,
+        );
         osc.connect(gain);
         gain.connect(audioCtx.destination);
         osc.start(audioCtx.currentTime + delay);
@@ -83,7 +88,11 @@ export default function FlowView() {
   }, []);
 
   const sendFocusNotification = () => {
-    if (typeof window !== "undefined" && "Notification" in window && Notification.permission === "granted") {
+    if (
+      typeof window !== "undefined" &&
+      "Notification" in window &&
+      Notification.permission === "granted"
+    ) {
       new Notification("🎯 GrowthOS 专注结束", {
         body: "恭喜完成一次深度专注！现在请休息 5 分钟，让大脑充充电，或开始费曼输出吧。",
       });
@@ -112,7 +121,9 @@ export default function FlowView() {
     audioRef.current.volume = noiseVolume;
 
     if (isPlayingNoise) {
-      audioRef.current.play().catch(err => console.log("白噪音播放需要交互授权:", err));
+      audioRef.current
+        .play()
+        .catch((err) => console.log("白噪音播放需要交互授权:", err));
     } else {
       audioRef.current.pause();
     }
@@ -204,7 +215,9 @@ export default function FlowView() {
       const data = await response.json();
 
       if (data.error === "NO_API_KEY") {
-        runLocalFeynmanSimulation("⚠️ 未检测到 API 密钥，已自动为您降级为本地模拟分析。请在 .env.local 中配置密钥以使用真实大模型。");
+        runLocalFeynmanSimulation(
+          "⚠️ 未检测到 API 密钥，已自动为您降级为本地模拟分析。请在 .env.local 中配置密钥以使用真实大模型。",
+        );
       } else if (data.error) {
         throw new Error(data.message || "请求失败");
       } else {
@@ -212,7 +225,9 @@ export default function FlowView() {
       }
     } catch (error) {
       console.error("Feynman Audit Error:", error);
-      runLocalFeynmanSimulation("⚠️ 真实 AI 评审接口连接失败，已自动降级为本地模拟分析。请检查网络与后台服务。");
+      runLocalFeynmanSimulation(
+        "⚠️ 真实 AI 评审接口连接失败，已自动降级为本地模拟分析。请检查网络与后台服务。",
+      );
     } finally {
       setIsFeynmanAnalysing(false);
     }
@@ -227,10 +242,15 @@ export default function FlowView() {
       "建议加入生动的生活实例（例如：将‘工具调用’类比为‘去餐馆根据菜单点菜’）。",
     ];
 
-    if (feynmanContent.includes("也就是说") || feynmanContent.includes("比如")) {
+    if (
+      feynmanContent.includes("也就是说") ||
+      feynmanContent.includes("比如")
+    ) {
       score += 5;
     } else {
-      suggestions.push("可以多使用‘举个例子’、‘换句话说’来增强你口语化的输出直觉。");
+      suggestions.push(
+        "可以多使用‘举个例子’、‘换句话说’来增强你口语化的输出直觉。",
+      );
     }
 
     setFeynmanResult({
@@ -243,10 +263,11 @@ export default function FlowView() {
   // ==========================================
   // 3. SM-2 卡片复习逻辑
   // ==========================================
-  const reviewCards = useLiveQuery(async () => {
-    const now = new Date();
-    return await db.cards.filter((c) => c.nextReview <= now).toArray();
-  }) || [];
+  const reviewCards =
+    useLiveQuery(async () => {
+      const now = new Date();
+      return await db.cards.filter((c) => c.nextReview <= now).toArray();
+    }) || [];
 
   const [currentCardIndex, setCurrentCardIndex] = useState(0);
   const [isFlipped, setIsFlipped] = useState(false);
@@ -338,7 +359,9 @@ export default function FlowView() {
                 SM-2 间隔重复记忆
               </span>
               <h2 className="text-xl font-bold mt-1">
-                {reviewCards.length === 0 ? "全部搞定 🎉" : `复习队列中 [${currentCardIndex + 1}/${reviewCards.length}]`}
+                {reviewCards.length === 0
+                  ? "全部搞定 🎉"
+                  : `复习队列中 [${currentCardIndex + 1}/${reviewCards.length}]`}
               </h2>
             </div>
 
@@ -351,7 +374,9 @@ export default function FlowView() {
                 <div className="w-12 h-12 rounded-full bg-primary/20 flex items-center justify-center mx-auto text-primary">
                   <CheckCircle className="w-6 h-6" />
                 </div>
-                <h3 className="text-lg font-bold">今日到期卡片已全部复习完毕！</h3>
+                <h3 className="text-lg font-bold">
+                  今日到期卡片已全部复习完毕！
+                </h3>
                 <p className="text-xs text-text-secondary max-w-[320px] mx-auto">
                   完美，你已击败了遗忘曲线。你的意志力和长期记忆力得到了进一步增强。
                 </p>
@@ -360,7 +385,7 @@ export default function FlowView() {
                     setReviewMode(false);
                     setActiveTab("dashboard");
                   }}
-                  className="bg-primary hover:bg-primary-hover text-primary-text font-bold text-xs uppercase tracking-widest px-6 py-2.5 rounded-full transition-all"
+                  className="bg-primary hover:bg-primary-hover text-primary-text font-bold text-xs uppercase tracking-widest px-6 py-2.5 rounded-xl transition-all duration-200 active:scale-95"
                 >
                   回到指挥舱
                 </button>
@@ -379,7 +404,10 @@ export default function FlowView() {
                       className="w-full h-full relative preserve-3d"
                     >
                       {/* 卡片正面 */}
-                      <SpotlightCard spotlightColor="rgba(59, 130, 246, 0.15)" className="absolute inset-0 backface-hidden rounded-2xl p-6 flex flex-col justify-between shadow-xl">
+                      <SpotlightCard
+                        spotlightColor="rgba(59, 130, 246, 0.15)"
+                        className="absolute inset-0 backface-hidden rounded-2xl p-6 flex flex-col justify-between shadow-xl"
+                      >
                         <span className="text-[10px] font-mono tracking-widest text-text-secondary uppercase">
                           FRONT · 提示问题
                         </span>
@@ -454,7 +482,10 @@ export default function FlowView() {
           // ==========================================
           <div className="w-full max-w-[800px] grid grid-cols-1 md:grid-cols-5 gap-8 pt-4">
             {/* 左侧番茄钟区域 (占 2/5) */}
-            <SpotlightCard spotlightColor="rgba(29, 185, 84, 0.15)" className="md:col-span-2 flex flex-col items-center gap-6 p-6 rounded-2xl h-fit">
+            <SpotlightCard
+              spotlightColor="rgba(29, 185, 84, 0.15)"
+              className="md:col-span-2 flex flex-col items-center gap-6 p-6 rounded-2xl h-fit"
+            >
               <span className="text-xs font-bold uppercase tracking-widest text-text-secondary font-mono flex items-center gap-1.5">
                 <Clock className="w-3.5 h-3.5 text-primary" /> Focus Timer
               </span>
@@ -468,10 +499,10 @@ export default function FlowView() {
               <div className="flex items-center gap-3 w-full">
                 <button
                   onClick={toggleTimer}
-                  className={`flex-1 py-2.5 rounded-full font-bold text-xs uppercase tracking-widest flex items-center justify-center gap-2 transition-all ${
+                  className={`flex-1 py-2.5 rounded-xl font-bold text-xs uppercase tracking-widest flex items-center justify-center gap-2 transition-all duration-200 active:scale-95 ${
                     isActive
                       ? "bg-surface-2 border border-border-subtle text-text-primary hover:bg-surface-3"
-                      : "bg-primary text-primary-text hover:bg-primary-hover hover:scale-[1.03]"
+                      : "bg-primary text-primary-text hover:bg-primary-hover hover:scale-[1.02]"
                   }`}
                 >
                   {isActive ? (
@@ -488,7 +519,7 @@ export default function FlowView() {
                 </button>
                 <button
                   onClick={resetTimer}
-                  className="w-10 h-10 rounded-full bg-surface-2 border border-border-subtle hover:border-text-secondary flex items-center justify-center text-text-secondary hover:text-text-primary transition-all"
+                  className="w-10 h-10 rounded-full bg-surface-2 border border-border-subtle hover:border-text-secondary flex items-center justify-center text-text-secondary hover:text-text-primary transition-all duration-200 active:scale-90"
                 >
                   <RotateCcw className="w-4 h-4" />
                 </button>
@@ -500,9 +531,11 @@ export default function FlowView() {
                   <button
                     key={mins}
                     onClick={() => setFlowTimerMinutes(mins)}
-                    className={`flex-1 py-1 rounded bg-surface-2 text-[10px] font-bold font-mono border ${
-                      flowTimerMinutes === mins ? "border-primary text-primary" : "border-transparent text-text-secondary"
-                    } hover:text-text-primary transition-colors`}
+                    className={`flex-1 py-1 rounded-lg bg-surface-2 text-[10px] font-bold font-mono border transition-all duration-200 active:scale-95 ${
+                      flowTimerMinutes === mins
+                        ? "border-primary text-primary"
+                        : "border-transparent text-text-secondary"
+                    } hover:text-text-primary hover:bg-surface-3`}
                   >
                     {mins}M
                   </button>
@@ -512,9 +545,7 @@ export default function FlowView() {
               {/* 白噪音环境音量播放控制器 */}
               <div className="w-full pt-4 border-t border-border-subtle/50 flex flex-col gap-3">
                 <div className="flex justify-between items-center text-[10px] uppercase font-bold tracking-widest text-text-secondary font-mono">
-                  <span className="flex items-center gap-1">
-                    🎧 环境白噪音
-                  </span>
+                  <span className="flex items-center gap-1">🎧 环境白噪音</span>
                   {noiseType !== "none" && (
                     <span className="text-primary font-bold lowercase">
                       {noiseType} {isPlayingNoise ? "播放中" : "已暂停"}
@@ -559,7 +590,9 @@ export default function FlowView() {
                     </button>
 
                     <div className="flex-1 flex items-center gap-2">
-                      <span className="text-[9px] text-text-secondary font-mono">音量</span>
+                      <span className="text-[9px] text-text-secondary font-mono">
+                        音量
+                      </span>
                       <input
                         type="range"
                         min="0.05"
@@ -579,15 +612,19 @@ export default function FlowView() {
             <div className="md:col-span-3 space-y-6">
               <div className="flex flex-col gap-2">
                 <h2 className="text-xl font-bold flex items-center gap-2">
-                  🧠 费曼输出板 (Feynman Board)
+                  费曼输出板 (Feynman Board)
                 </h2>
                 <p className="text-xs text-text-secondary leading-relaxed">
-                  通过向零基础的小白解释一个事物来达成深入掌握。在此写下你的讲述大纲，让 AI 评估你的语言易懂度。
+                  通过向零基础的小白解释一个事物来达成深入掌握。在此写下你的讲述大纲，让
+                  AI 评估你的语言易懂度。
                 </p>
               </div>
 
               {/* 输入框 */}
-              <SpotlightCard spotlightColor="rgba(29, 185, 84, 0.12)" className="space-y-4 p-5 rounded-2xl">
+              <SpotlightCard
+                spotlightColor="rgba(29, 185, 84, 0.12)"
+                className="space-y-4 p-5 rounded-2xl"
+              >
                 <div className="space-y-1.5">
                   <label className="text-[10px] uppercase font-bold tracking-widest text-primary font-mono block">
                     解释目标概念
@@ -616,8 +653,10 @@ export default function FlowView() {
 
                 <button
                   onClick={handleFeynmanAudit}
-                  disabled={!feynmanTopic || !feynmanContent || isFeynmanAnalysing}
-                  className={`w-full py-2.5 rounded-full font-bold text-xs uppercase tracking-widest flex items-center justify-center gap-2 transition-all ${
+                  disabled={
+                    !feynmanTopic || !feynmanContent || isFeynmanAnalysing
+                  }
+                  className={`w-full py-2.5 rounded-xl font-bold text-xs uppercase tracking-widest flex items-center justify-center gap-2 transition-all duration-200 active:scale-95 ${
                     !feynmanTopic || !feynmanContent || isFeynmanAnalysing
                       ? "bg-surface-3 text-text-secondary cursor-not-allowed"
                       : "bg-primary text-primary-text hover:bg-primary-hover hover:scale-[1.02]"
@@ -640,7 +679,10 @@ export default function FlowView() {
               {/* AI 判官评审结果 */}
               <AnimatePresence>
                 {feynmanResult && (
-                  <SpotlightCard spotlightColor="rgba(59, 130, 246, 0.2)" className="p-5 rounded-2xl flex flex-col gap-4 relative overflow-hidden">
+                  <SpotlightCard
+                    spotlightColor="rgba(59, 130, 246, 0.2)"
+                    className="p-5 rounded-2xl flex flex-col gap-4 relative overflow-hidden"
+                  >
                     <div className="absolute top-0 right-0 w-2 h-full bg-ai-blue" />
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
@@ -649,9 +691,13 @@ export default function FlowView() {
                           Feynman Audit Result
                         </span>
                       </div>
-                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded font-mono ${
-                        feynmanResult.score >= 85 ? "bg-primary/20 text-primary" : "bg-amber-500/20 text-amber-500"
-                      }`}>
+                      <span
+                        className={`text-[10px] font-bold px-2 py-0.5 rounded font-mono ${
+                          feynmanResult.score >= 85
+                            ? "bg-primary/20 text-primary"
+                            : "bg-amber-500/20 text-amber-500"
+                        }`}
+                      >
                         评级: {feynmanResult.grade}
                       </span>
                     </div>
@@ -660,7 +706,9 @@ export default function FlowView() {
                       <span className="text-4xl font-extrabold tracking-tight text-text-primary">
                         {feynmanResult.score}
                       </span>
-                      <span className="text-xs text-text-secondary font-mono">/ 100 分</span>
+                      <span className="text-xs text-text-secondary font-mono">
+                        / 100 分
+                      </span>
                     </div>
 
                     <div className="space-y-2 border-t border-border-subtle/50 pt-3">
@@ -669,8 +717,13 @@ export default function FlowView() {
                       </span>
                       <ul className="space-y-2">
                         {feynmanResult.tips.map((tip, idx) => (
-                          <li key={idx} className="text-xs text-text-secondary leading-relaxed flex items-start gap-2">
-                            <span className="text-primary font-bold mt-0.5">•</span>
+                          <li
+                            key={idx}
+                            className="text-xs text-text-secondary leading-relaxed flex items-start gap-2"
+                          >
+                            <span className="text-primary font-bold mt-0.5">
+                              •
+                            </span>
                             <span>{tip}</span>
                           </li>
                         ))}
