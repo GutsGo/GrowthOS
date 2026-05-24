@@ -509,7 +509,7 @@ export default function DashboardView({
                       transition={{ type: "spring", stiffness: 300, damping: 20 }}
                       onClick={() => toggleHabitLog(habit.id)}
                       spotlightColor={isLogged ? "rgba(29, 185, 84, 0.25)" : isRecommended ? "rgba(29, 185, 84, 0.35)" : "rgba(29, 185, 84, 0.12)"}
-                      className={`relative p-4 rounded-xl border cursor-pointer select-none overflow-hidden flex items-center justify-between ${
+                      className={`relative rounded-xl border cursor-pointer select-none overflow-hidden ${
                         isLogged
                           ? "border-primary/40 shadow-[0_0_12px_rgba(29,185,84,0.15)]"
                           : isRecommended
@@ -517,58 +517,60 @@ export default function DashboardView({
                           : "border-border-subtle hover:border-text-secondary"
                       }`}
                     >
-                      <div className="flex items-center gap-3 min-w-0 flex-1">
-                        <div
-                          className={`w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 transition-colors ${
-                            isLogged
-                              ? "bg-primary text-black"
-                              : isRecommended
-                              ? "bg-primary/20 text-primary animate-pulse"
-                              : "bg-surface-3 text-text-secondary"
-                          }`}
-                        >
-                          {getHabitIcon(habit.icon)}
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-center gap-1.5 flex-wrap">
-                            <p className="text-sm font-bold text-text-primary truncate">{habit.name}</p>
-                            {isRecommended && (
-                              <span className="text-[9px] bg-primary/20 text-primary font-bold font-mono px-1.5 py-0.5 rounded uppercase tracking-wider flex-shrink-0">
-                                最宜
-                              </span>
-                            )}
-                          </div>
-                          <span className="text-[10px] text-text-secondary uppercase tracking-widest font-mono block mt-0.5">
-                            阻力: {habit.energyDemand} 能量
-                          </span>
-                        </div>
-                      </div>
-                      
-                      <div className="flex items-center justify-center flex-shrink-0 ml-3">
-                        <div className="relative flex items-center justify-center w-6 h-6">
-                          {/* 局部打卡 Confetti 特效 */}
-                          {habitParticles[habit.id] && habitParticles[habit.id].map((p) => (
-                            <motion.div
-                              key={p.id}
-                              className="absolute w-1 h-1 rounded-full pointer-events-none z-10"
-                              style={{ backgroundColor: p.color }}
-                              animate={{
-                                x: Math.cos(p.angle) * p.speed * 3.5,
-                                y: Math.sin(p.angle) * p.speed * 3.5,
-                                scale: [1, 1.2, 0.1],
-                                opacity: [1, 1, 0]
-                              }}
-                              transition={{ duration: 0.8, ease: "easeOut" }}
-                            />
-                          ))}
+                      <div className="w-full h-full flex items-center justify-between p-4">
+                        <div className="flex items-center gap-3 min-w-0 flex-1">
                           <div
-                            className={`w-full h-full rounded-full border flex items-center justify-center transition-all ${
+                            className={`w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 transition-colors ${
                               isLogged
-                                ? "bg-primary border-primary text-black"
-                                : "border-muted-gray group-hover:border-text-secondary bg-transparent"
+                                ? "bg-primary text-black"
+                                : isRecommended
+                                ? "bg-primary/20 text-primary animate-pulse"
+                                : "bg-surface-3 text-text-secondary"
                             }`}
                           >
-                            {isLogged && <Check className="w-3.5 h-3.5 stroke-[3]" />}
+                            {getHabitIcon(habit.icon)}
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <p className="text-sm font-bold text-text-primary truncate">{habit.name}</p>
+                              {isRecommended && (
+                                <span className="text-[9px] bg-primary/20 text-primary font-bold font-mono px-1.5 py-0.5 rounded uppercase tracking-wider flex-shrink-0">
+                                  最宜
+                                </span>
+                              )}
+                            </div>
+                            <span className="text-[10px] text-text-secondary uppercase tracking-widest font-mono block mt-0.5">
+                              阻力: {habit.energyDemand} 能量
+                            </span>
+                          </div>
+                        </div>
+                        
+                        <div className="flex items-center justify-center flex-shrink-0 ml-3">
+                          <div className="relative flex items-center justify-center w-6 h-6">
+                            {/* 局部打卡 Confetti 特效 */}
+                            {habitParticles[habit.id] && habitParticles[habit.id].map((p) => (
+                              <motion.div
+                                key={p.id}
+                                className="absolute w-1 h-1 rounded-full pointer-events-none z-10"
+                                style={{ backgroundColor: p.color }}
+                                animate={{
+                                  x: Math.cos(p.angle) * p.speed * 3.5,
+                                  y: Math.sin(p.angle) * p.speed * 3.5,
+                                  scale: [1, 1.2, 0.1],
+                                  opacity: [1, 1, 0]
+                                }}
+                                transition={{ duration: 0.8, ease: "easeOut" }}
+                              />
+                            ))}
+                            <div
+                              className={`w-full h-full rounded-full border flex items-center justify-center transition-all ${
+                                isLogged
+                                  ? "bg-primary border-primary text-black"
+                                  : "border-muted-gray group-hover:border-text-secondary bg-transparent"
+                              }`}
+                            >
+                              {isLogged && <Check className="w-3.5 h-3.5 stroke-[3]" />}
+                            </div>
                           </div>
                         </div>
                       </div>
