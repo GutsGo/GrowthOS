@@ -517,9 +517,9 @@ export default function DashboardView({
                           : "border-border-subtle hover:border-text-secondary"
                       }`}
                     >
-                      <div className="flex items-center gap-3">
+                      <div className="flex items-center gap-3 min-w-0 flex-1">
                         <div
-                          className={`w-9 h-9 rounded-lg flex items-center justify-center transition-colors ${
+                          className={`w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 transition-colors ${
                             isLogged
                               ? "bg-primary text-black"
                               : isRecommended
@@ -529,20 +529,22 @@ export default function DashboardView({
                         >
                           {getHabitIcon(habit.icon)}
                         </div>
-                        <div>
-                          <p className="text-sm font-bold text-text-primary">{habit.name}</p>
-                          <span className="text-[10px] text-text-secondary uppercase tracking-widest font-mono">
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <p className="text-sm font-bold text-text-primary truncate">{habit.name}</p>
+                            {isRecommended && (
+                              <span className="text-[9px] bg-primary/20 text-primary font-bold font-mono px-1.5 py-0.5 rounded uppercase tracking-wider flex-shrink-0">
+                                最宜
+                              </span>
+                            )}
+                          </div>
+                          <span className="text-[10px] text-text-secondary uppercase tracking-widest font-mono block mt-0.5">
                             阻力: {habit.energyDemand} 能量
                           </span>
                         </div>
                       </div>
                       
-                      <div className="flex items-center gap-2">
-                        {isRecommended && (
-                          <span className="text-[9px] bg-primary/20 text-primary font-bold font-mono px-1.5 py-0.5 rounded uppercase tracking-wider">
-                            当前最宜
-                          </span>
-                        )}
+                      <div className="flex items-center justify-center flex-shrink-0 ml-3">
                         <div className="relative flex items-center justify-center w-6 h-6">
                           {/* 局部打卡 Confetti 特效 */}
                           {habitParticles[habit.id] && habitParticles[habit.id].map((p) => (
