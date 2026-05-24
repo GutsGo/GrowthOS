@@ -24,7 +24,16 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="zh-CN" className={`${dmSans.variable} ${jetbrainsMono.variable}`}>
-      <body className="antialiased">{children}</body>
+      <head>
+        <link rel="manifest" href="/manifest.json" />
+        <meta name="theme-color" content="#121212" />
+        <meta name="apple-mobile-web-app-capable" content="yes" />
+        <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+        <link rel="apple-touch-icon" href="https://img.icons8.com/nolan/512/rocket.png" />
+      </head>
+      <body className="antialiased">
+        {children}
+      </body>
     </html>
   );
 }

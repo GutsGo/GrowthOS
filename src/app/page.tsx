@@ -49,6 +49,19 @@ export default function Home() {
     }
   }, [setTheme]);
 
+  // 0.1 注册 PWA ServiceWorker
+  useEffect(() => {
+    if (typeof window !== "undefined" && "serviceWorker" in navigator && window.location.hostname !== "localhost") {
+      window.addEventListener("load", () => {
+        navigator.serviceWorker.register("/sw.js").then((reg) => {
+          console.log("PWA ServiceWorker 注册成功, scope: ", reg.scope);
+        }).catch((err) => {
+          console.warn("PWA ServiceWorker 注册失败: ", err);
+        });
+      });
+    }
+  }, []);
+
   const toggleTheme = () => {
     const nextTheme = theme === "dark" ? "light" : "dark";
     setTheme(nextTheme);
