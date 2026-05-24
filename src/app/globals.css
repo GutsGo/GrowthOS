@@ -73,3 +73,44 @@ body {
   font-family: var(--font-sans);
   transition: background-color 0.25s ease, color 0.25s ease, border-color 0.25s ease;
 }
+
+/* 按钮、链接以及可交互元素全局手势重置 */
+button,
+[role="button"],
+a,
+input[type="submit"],
+input[type="button"] {
+  cursor: pointer;
+}
+
+/* 3D 景深与卡片旋转补丁 */
+.perspective-1000 {
+  perspective: 1000px;
+}
+.preserve-3d {
+  transform-style: preserve-3d;
+}
+.backface-hidden {
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+
+/* 晚间复盘脉冲呼吸边框动效 */
+@keyframes borderPulse {
+  0% {
+    border-color: var(--color-border-subtle);
+    box-shadow: 0 0 0 rgba(29, 185, 84, 0);
+  }
+  50% {
+    border-color: var(--color-primary);
+    box-shadow: 0 0 12px rgba(29, 185, 84, 0.25);
+  }
+  100% {
+    border-color: var(--color-border-subtle);
+    box-shadow: 0 0 0 rgba(29, 185, 84, 0);
+  }
+}
+
+.animate-pulse-slow {
+  animation: borderPulse 2.5s infinite ease-in-out;
+}
