@@ -108,6 +108,12 @@ export default function DashboardView({
   // 今日能量滑块状态
   const [energy, setEnergy] = useState<number>(5);
 
+  // 挂载状态，防止日期等状态发生服务端与客户端水合不一致问题
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
   // 晚间灵魂复盘状态
   const [isReviewing, setIsReviewing] = useState(false);
   const [isReviewLoading, setIsReviewLoading] = useState(false);
@@ -386,7 +392,7 @@ export default function DashboardView({
       <header className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 border-b border-border-subtle pb-6">
         <div>
           <p className="text-xs text-text-secondary font-mono uppercase tracking-widest">
-            {friendlyDate}
+            {mounted ? friendlyDate : ""}
           </p>
           <h1 className="text-3xl font-extrabold tracking-tight mt-1 text-text-primary">
             今日指挥舱
@@ -809,6 +815,57 @@ export default function DashboardView({
               </div>
 
               <form onSubmit={handleSaveWoop} className="p-5 space-y-4 overflow-y-auto max-h-[70vh]">
+                {/* 智能灵感一键伴写 */}
+                <div className="p-3 bg-surface-2/60 border border-border-subtle rounded-xl flex flex-col gap-2">
+                  <div className="flex items-center gap-1.5">
+                    <Sparkles className="w-3.5 h-3.5 text-primary animate-pulse" />
+                    <span className="text-[10px] uppercase font-bold tracking-widest text-text-secondary font-mono">
+                      💡 智能灵感一键伴写
+                    </span>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    <button
+                      key="coding"
+                      type="button"
+                      onClick={() => {
+                        setWish("编写完 GrowthOS 的核心引导交互逻辑");
+                        setOutcome("代码跑通，功能闭环，获得满满的掌控感与成就感");
+                        setObstacle("觉得逻辑繁杂，写一会就想切出去刷社交软件");
+                        setPlan("如果我想切出去刷社交软件，我就深呼吸一次，强迫自己只留在编辑器里再写 3 行代码。");
+                      }}
+                      className="px-2.5 py-1 bg-surface-3 hover:bg-primary/20 hover:text-primary transition-all rounded-md text-[10px] font-bold text-text-secondary border border-border-subtle"
+                    >
+                      🚀 攻克核心编码
+                    </button>
+                    <button
+                      key="exercise"
+                      type="button"
+                      onClick={() => {
+                        setWish("进行 15 分钟的拉伸或俯卧撑练习");
+                        setOutcome("唤醒身体细胞，精力恢复，晚上睡眠质量更高");
+                        setObstacle("下班回到家觉得很疲惫，只想躺在沙发上刷视频");
+                        setPlan("如果我躺在沙发上不想动，我就只穿上运动鞋在客厅站 2 分钟，即便不运动也行。");
+                      }}
+                      className="px-2.5 py-1 bg-surface-3 hover:bg-primary/20 hover:text-primary transition-all rounded-md text-[10px] font-bold text-text-secondary border border-border-subtle"
+                    >
+                      🏃‍♂️ 无压力运动
+                    </button>
+                    <button
+                      key="review"
+                      type="button"
+                      onClick={() => {
+                        setWish("复习完今日到期的所有记忆卡片");
+                        setOutcome("彻底锁定今天学到的技术点，打破遗忘曲线，学习效率倍增");
+                        setObstacle("看到卡片数量觉得有些累，产生拖延情绪");
+                        setPlan("如果我产生拖延情绪，那么我先点开「开始复习」，只要求自己复习最前面 2 张卡片。");
+                      }}
+                      className="px-2.5 py-1 bg-surface-3 hover:bg-primary/20 hover:text-primary transition-all rounded-md text-[10px] font-bold text-text-secondary border border-border-subtle"
+                    >
+                      🧠 零阻力复习
+                    </button>
+                  </div>
+                </div>
+
                 <div className="space-y-1.5">
                   <label className="text-[10px] uppercase font-bold tracking-widest text-primary">
                     Wish 愿望
