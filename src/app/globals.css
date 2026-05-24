@@ -1,26 +1,75 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --color-primary: #16a34a; /* 亮色下选用更深且健康的森林绿以保证阅读对比度 */
+  --color-primary-hover: #15803d;
+  --color-primary-text: #ffffff; /* 亮色下森林绿背景配白色文字 */
+  --color-ai-blue: #3b82f6;
+  
+  /* 浅色主题 (Light Mode) 变量 */
+  --color-background-void: #FAFAFA;
+  --color-surface-1: #ffffff;
+  --color-surface-2: #f4f4f5;
+  --color-surface-3: #e4e4e7;
+  --color-text-primary: #09090b;
+  --color-text-secondary: #71717a;
+  --color-muted-gray: #a1a1aa;
+  --color-neutral-gray: #71717a;
+  --color-border-subtle: #e4e4e7;
+  
+  --color-success: #1DB954;
+  --color-warning: #f59b23;
+  --color-error: #e22134;
+
+  --shadow-level-3: 0 4px 20px rgba(0, 0, 0, 0.08);
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+.dark {
+  /* 深色主题 (Dark Mode) 变量 */
+  --color-primary: #1DB954;
+  --color-primary-hover: #1ED760;
+  --color-primary-text: #000000; /* 深色下 Spotify 绿背景配黑色文字 */
+  --color-background-void: #121212;
+  --color-surface-1: #181818;
+  --color-surface-2: #282828;
+  --color-surface-3: #333333;
+  --color-text-primary: #ffffff;
+  --color-text-secondary: #a7a7a7;
+  --color-muted-gray: #535353;
+  --color-neutral-gray: #b3b3b3;
+  --color-border-subtle: #282828;
+  
+  --shadow-level-3: 0 -8px 24px rgba(0, 0, 0, 0.5);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+@theme {
+  --color-primary: var(--color-primary);
+  --color-primary-hover: var(--color-primary-hover);
+  --color-primary-text: var(--color-primary-text);
+  --color-ai-blue: var(--color-ai-blue);
+  --color-background-void: var(--color-background-void);
+  --color-surface-1: var(--color-surface-1);
+  --color-surface-2: var(--color-surface-2);
+  --color-surface-3: var(--color-surface-3);
+  --color-text-primary: var(--color-text-primary);
+  --color-text-secondary: var(--color-text-secondary);
+  --color-muted-gray: var(--color-muted-gray);
+  --color-neutral-gray: var(--color-neutral-gray);
+  --color-border-subtle: var(--color-border-subtle);
+  
+  --color-success: var(--color-success);
+  --color-warning: var(--color-warning);
+  --color-error: var(--color-error);
+
+  --font-sans: var(--font-dm-sans), sans-serif;
+  --font-mono: var(--font-jetbrains-mono), monospace;
+  
+  --shadow-level-3: var(--shadow-level-3);
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background-color: var(--color-background-void);
+  color: var(--color-text-primary);
+  font-family: var(--font-sans);
+  transition: background-color 0.25s ease, color 0.25s ease, border-color 0.25s ease;
 }
