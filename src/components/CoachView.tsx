@@ -422,7 +422,7 @@ export default function CoachView() {
         {isTrainingActive ? (
           <button
             onClick={handleResetTraining}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-error/50 hover:bg-error/10 text-xs font-semibold text-error transition-colors"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-error/50 hover:bg-error/10 text-xs font-semibold text-error transition-all duration-200 active:scale-95"
           >
             <RefreshCw className="w-3.5 h-3.5" />
             <span>终止演练</span>
@@ -434,11 +434,11 @@ export default function CoachView() {
               value={roleplayTarget}
               onChange={(e) => setRoleplayTarget(e.target.value)}
               placeholder="设定对方角色 (如：暴躁的技术总监)"
-              className="px-3 h-8 bg-surface-1 border border-border-subtle rounded-lg text-xs outline-none focus:border-primary text-text-primary placeholder:text-neutral-gray flex-1 sm:w-[180px] md:w-[220px]"
+              className="px-3 h-8 bg-surface-1 border border-border-subtle rounded-xl text-xs outline-none focus:border-primary text-text-primary placeholder:text-neutral-gray flex-1 sm:w-[180px] md:w-[220px]"
             />
             <button
               onClick={handleStartTraining}
-              className="bg-primary hover:bg-primary-hover text-primary-text text-xs font-bold px-4 h-8 rounded-lg flex items-center justify-center gap-1 transition-all"
+              className="bg-primary hover:bg-primary-hover text-primary-text text-xs font-bold px-4 h-8 rounded-xl flex items-center justify-center gap-1 transition-all duration-200 active:scale-95"
             >
               <span>启动演练</span>
               <ArrowRight className="w-3.5 h-3.5" />
@@ -579,7 +579,7 @@ export default function CoachView() {
                           `【优秀回复示例】:\n对方提问后，可以这样说：“平时我的双手主要用来和键盘‘打架’，不过看到你这些这么有灵气的画，觉得我的键盘也需要去充充氧气了。”\n\n【高情商技巧】：\n${msg.coachFeedback?.advice || ""}`
                         )
                       }
-                      className="w-full py-1.5 bg-surface-3 hover:bg-primary hover:text-primary-text transition-colors rounded text-[10px] font-bold uppercase tracking-widest flex items-center justify-center gap-1"
+                      className="w-full py-1.5 bg-surface-3 hover:bg-primary hover:text-primary-text transition-all duration-200 rounded-xl text-[10px] font-bold uppercase tracking-widest flex items-center justify-center gap-1 active:scale-95"
                     >
                       <PlusCircle className="w-3 h-3" />
                       <span>提炼为记忆卡片存入第二大脑</span>
