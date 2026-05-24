@@ -88,7 +88,7 @@ export default function CoachView() {
   };
 
   // 3. 发送消息逻辑
-  const handleSendMessage = (e: React.FormEvent) => {
+  const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!inputVal.trim()) return;
 
@@ -99,77 +99,117 @@ export default function CoachView() {
       timestamp: new Date(),
     };
 
-    setMessages((prev) => [...prev, userMsg]);
+    const newMessages = [...messages, userMsg];
+    setMessages(newMessages);
     setInputVal("");
 
-    // 如果处于演练状态下，由 AI 教练和人设进行回复与指标反馈
     if (isTrainingActive) {
-      const nextTurn = turnCount + 1;
-      setTurnCount(nextTurn);
+      setTurnCount((prev) => prev + 1);
 
-      setTimeout(() => {
-        // 模拟人设回答
-        const botResponses = [
-          "哈哈，是的，我大部分工作时间都是在画板前度过的，经常会有些自我怀疑。你喜欢什么风格的画呀？",
-          "感觉你的回答很有礼貌，不过平时你也会做一些类似的手工或者画画吗？",
-          "确实画画是一件很需要耐心的事，听你这么说还挺有趣的。",
-        ];
-        
-        const coachFeedbacks = [
-          {
-            emotionalValue: 7,
-            needinessControl: 9,
-            witScore: 6,
-            advice: "回复整体得体无需求感。但对于‘插画集’这个话题没有提供足够的情绪反馈，建议追问她最近最得意的插画是哪一幅，以此增加谈话热度。",
-          },
-          {
-            emotionalValue: 8,
-            needinessControl: 8,
-            witScore: 8,
-            advice: "表现不错！成功捕获了对方的好奇心。接下来的回复可以尝试更幽默的自嘲，让对话更加放松自然。",
-          },
-          {
-            emotionalValue: 5,
-            needinessControl: 4,
-            witScore: 5,
-            advice: "对方表示‘自我怀疑’时，你的回答缺乏同理心关怀，且问句有轻微说教感。建议用倾听加赞赏（提供情绪价值）来破冰。",
-          },
-        ];
+      try {
+        const response = await fetch("/api/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            messages: newMessages,
+            roleplayTarget,
+          }),
+        });
 
-        const rIdx = Math.floor(Math.random() * botResponses.length);
-        const fbIdx = Math.floor(Math.random() * coachFeedbacks.length);
-        const botReply = botResponses[rIdx];
-        const coachFeedback = coachFeedbacks[fbIdx];
+        if (!response.ok) throw new Error("API call failed");
 
-        const botMsg: Message = {
-          id: crypto.randomUUID(),
-          sender: "bot",
-          text: botReply,
-          timestamp: new Date(),
-        };
+        const data = await response.json();
 
-        const coachMsg: Message = {
-          id: crypto.randomUUID(),
-          sender: "coach",
-          text: "🔍 AI 教练已跳出人设，对你上一轮发言进行高情商复盘：",
-          timestamp: new Date(),
-          coachFeedback,
-        };
+        if (data.error === "NO_API_KEY") {
+          runLocalCoachSimulation("⚠️ 未检测到 API 密钥，已自动为您降级为本地模拟分析。请在 .env.local 中配置密钥以使用真实大模型。\n\n");
+        } else if (data.error) {
+          throw new Error(data.message || "请求失败");
+        } else {
+          const botMsg: Message = {
+            id: crypto.randomUUID(),
+            sender: "bot",
+            text: data.botReply,
+            timestamp: new Date(),
+          };
 
-        setMessages((prev) => [...prev, botMsg, coachMsg]);
-      }, 1500);
+          const coachMsg: Message = {
+            id: crypto.randomUUID(),
+            sender: "coach",
+            text: "🔍 AI 教练已跳出人设，对你上一轮发言进行高情商复盘：",
+            timestamp: new Date(),
+            coachFeedback: data.coachFeedback,
+          };
+
+          setMessages((prev) => [...prev, botMsg, coachMsg]);
+        }
+      } catch (error) {
+        console.error("AI Coach Chat Error:", error);
+        runLocalCoachSimulation("⚠️ 真实 AI 诊断接口连接失败，已自动降级为本地模拟分析。请检查您的网络和 API 配置。\n\n");
+      }
     } else {
-      // 非社交演练下的普通回复
       setTimeout(() => {
         const coachMsg: Message = {
           id: crypto.randomUUID(),
           sender: "coach",
-          text: "收到你的消息。在后续 Phase 中，我将完全具备上下文检索 (RAG) 和动态思维链推理能力，为你量身定制个性化的复盘洞察与挑战建议。现在，你可以先通过上方按钮开启「高情商社交演练」！",
+          text: "你好！我已收到你的消息。在未启动「社交演练」时，我可以回答一些关于个人成长或习惯养成的问题。若想进行高情商沟通测试，欢迎在上方设置对方角色并点击「启动演练」！",
           timestamp: new Date(),
         };
         setMessages((prev) => [...prev, coachMsg]);
-      }, 1000);
+      }, 800);
     }
+  };
+
+  const runLocalCoachSimulation = (warningPrefix: string) => {
+    setTimeout(() => {
+      const botResponses = [
+        "哈哈，是的，我大部分工作时间都是在画板前度过的，经常会有些自我怀疑。你喜欢什么风格的画呀？",
+        "感觉你的回答很有礼貌，不过平时你也会做一些类似的手工或者画画吗？",
+        "确实画画是一件很需要耐心的事，听你这么说还挺有趣的。",
+      ];
+      
+      const coachFeedbacks = [
+        {
+          emotionalValue: 7,
+          needinessControl: 9,
+          witScore: 6,
+          advice: warningPrefix + "回复整体得体无需求感。但对于‘插画集’这个话题没有提供足够的情绪反馈，建议追问她最近最得意的插画是哪一幅，以此增加谈话热度。",
+        },
+        {
+          emotionalValue: 8,
+          needinessControl: 8,
+          witScore: 8,
+          advice: warningPrefix + "表现不错！成功捕获了对方的好奇心。接下来的回复可以尝试更幽默的自嘲，让对话更加放松自然。",
+        },
+        {
+          emotionalValue: 5,
+          needinessControl: 4,
+          witScore: 5,
+          advice: warningPrefix + "对方表示‘自我怀疑’时，你的回答缺乏同理心关怀，且问句有轻微说教感。建议用倾听加赞赏（提供情绪价值）来破冰。",
+        },
+      ];
+
+      const rIdx = Math.floor(Math.random() * botResponses.length);
+      const fbIdx = Math.floor(Math.random() * coachFeedbacks.length);
+      const botReply = botResponses[rIdx];
+      const coachFeedback = coachFeedbacks[fbIdx];
+
+      const botMsg: Message = {
+        id: crypto.randomUUID(),
+        sender: "bot",
+        text: botReply,
+        timestamp: new Date(),
+      };
+
+      const coachMsg: Message = {
+        id: crypto.randomUUID(),
+        sender: "coach",
+        text: "🔍 AI 教练已跳出人设，对你上一轮发言进行高情商复盘：",
+        timestamp: new Date(),
+        coachFeedback,
+      };
+
+      setMessages((prev) => [...prev, botMsg, coachMsg]);
+    }, 1000);
   };
 
   // 4. 将精彩话术一键保存到第二大脑闪卡库
