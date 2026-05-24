@@ -16,6 +16,9 @@ import {
   PlusCircle,
   TrendingUp,
 } from "lucide-react";
+import SpotlightCard from "./reactbits/SpotlightCard";
+import DecryptedText from "./reactbits/DecryptedText";
+import Squares from "./reactbits/Squares";
 
 interface Message {
   id: string;
@@ -28,6 +31,12 @@ interface Message {
     needinessControl: number; // 需求感控制
     witScore: number; // 幽默风趣分
     advice: string;
+  };
+  // 新增：大模型工具执行指令属性
+  toolCallInfo?: {
+    action: string;
+    success: boolean;
+    message: string;
   };
 }
 
@@ -52,6 +61,111 @@ export default function CoachView() {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
+
+  // 匹配本地正则工具调用
+  const matchLocalRegexToolCall = (text: string) => {
+    const createRegex = /(?:创建习惯|新建习惯|加个习惯|加习惯)\s*[:：\s]*([^\s，,。；!！]+)/i;
+    const demandRegex = /(?:阻力|能量)(?:为|是|设为)?\s*(高|中|低)/i;
+    const checkRegex = /([^\s，,。；!！]+)\s*(?:打卡|打个卡|签到)/i;
+    const checkPrefixRegex = /(?:帮我)?(?:对)?\s*([^\s，,。；!！]+)\s*(?:打卡|签到)/i;
+
+    let match = text.match(createRegex);
+    if (match) {
+      const name = match[1];
+      const demandMatch = text.match(demandRegex);
+      let energyDemand: "high" | "medium" | "low" = "medium";
+      if (demandMatch) {
+        const d = demandMatch[1];
+        if (d === "高") energyDemand = "high";
+        if (d === "低") energyDemand = "low";
+      }
+      
+      let icon = "Target";
+      if (name.includes("码") || name.includes("code") || name.includes("编程") || name.includes("程序")) icon = "Code";
+      if (name.includes("聊") || name.includes("沟通") || name.includes("英语") || name.includes("说") || name.includes("背")) icon = "MessageSquare";
+      if (name.includes("动") || name.includes("跑") || name.includes("健身") || name.includes("铁") || name.includes("练")) icon = "Activity";
+      if (name.includes("读") || name.includes("书") || name.includes("学") || name.includes("思考")) icon = "User";
+
+      return {
+        action: "create_habit",
+        params: { name, icon, frequency: "daily", energyDemand }
+      };
+    }
+
+    match = text.match(checkRegex) || text.match(checkPrefixRegex);
+    if (match) {
+      const name = match[1];
+      const cleanName = name.replace(/习惯/g, "");
+      return {
+        action: "check_habit",
+        params: { name: cleanName }
+      };
+    }
+
+    return null;
+  };
+
+  // 执行本地 IndexedDB 操作并给出状态反馈
+  const executeLocalToolCall = async (action: string, params: any) => {
+    try {
+      const today = new Date().toISOString().split("T")[0];
+      
+      if (action === "create_habit") {
+        const { name, icon, frequency, energyDemand } = params;
+        const exist = await db.habits.where("name").equals(name).first();
+        if (exist) {
+          return { success: false, message: `习惯【${name}】已在本地库中存在，无需重复创建。` };
+        }
+        await db.habits.add({
+          id: crypto.randomUUID(),
+          name,
+          icon: icon || "Target",
+          frequency: frequency || "daily",
+          energyDemand: energyDemand || "medium",
+          createdAt: new Date(),
+        });
+        return { success: true, message: `已成功为您创建新原子习惯：【${name}】（阻力配置：${energyDemand === "high" ? "高" : energyDemand === "low" ? "低" : "中"}）。` };
+      }
+      
+      if (action === "check_habit") {
+        const { name } = params;
+        const habit = await db.habits.filter((h) => h.name.includes(name)).first();
+        if (!habit) {
+          return { success: false, message: `未能在本地找到名字包含“${name}”的习惯，请核对。` };
+        }
+        const logged = await db.habitLogs.where({ habitId: habit.id, date: today }).first();
+        if (logged) {
+          return { success: false, message: `今日习惯【${habit.name}】已在今日打过卡，请勿重复操作。` };
+        }
+        await db.habitLogs.add({
+          id: crypto.randomUUID(),
+          habitId: habit.id,
+          date: today,
+          createdAt: new Date(),
+        });
+        return { success: true, message: `已成功为您执行今日习惯打卡签到：【${habit.name}】！` };
+      }
+      
+      if (action === "create_woop") {
+        const { wish, outcome, obstacle, plan } = params;
+        const exist = await db.dailyRecords.get(today);
+        await db.dailyRecords.put({
+          date: today,
+          woopWish: wish,
+          woopOutcome: outcome,
+          woopObstacle: obstacle,
+          woopPlan: plan,
+          energyLevel: exist?.energyLevel || 5,
+          createdAt: exist?.createdAt || new Date(),
+        });
+        return { success: true, message: `已设定今日意图 (WOOP)！Wish: ${wish} / If-Then Plan: ${plan}` };
+      }
+      
+      return { success: false, message: "未知的工具操作类型" };
+    } catch (e: any) {
+      return { success: false, message: `执行本地工具失败: ${e.message}` };
+    }
+  };
 
   // 1. 开启社交演练训练
   const handleStartTraining = () => {
@@ -101,6 +215,7 @@ export default function CoachView() {
 
     const newMessages = [...messages, userMsg];
     setMessages(newMessages);
+    const sentText = inputVal; // 备份输入文字
     setInputVal("");
 
     if (isTrainingActive) {
@@ -121,7 +236,7 @@ export default function CoachView() {
         const data = await response.json();
 
         if (data.error === "NO_API_KEY") {
-          runLocalCoachSimulation("⚠️ 未检测到 API 密钥，已自动为您降级为本地模拟分析。请在 .env.local 中配置密钥以使用真实大模型。\n\n");
+          runLocalCoachSimulation("⚠️ 未检测到 API 密钥，已自动为您降级为本地模拟分析。请在 .env.local 中配置密钥以使用真实大模型。\n\n", sentText);
         } else if (data.error) {
           throw new Error(data.message || "请求失败");
         } else {
@@ -140,27 +255,66 @@ export default function CoachView() {
             coachFeedback: data.coachFeedback,
           };
 
-          setMessages((prev) => [...prev, botMsg, coachMsg]);
+          let extraMsg: Message | null = null;
+          if (data.toolCall) {
+            const execRes = await executeLocalToolCall(data.toolCall.action, data.toolCall.params);
+            extraMsg = {
+              id: crypto.randomUUID(),
+              sender: "coach",
+              text: execRes.message,
+              timestamp: new Date(),
+              toolCallInfo: {
+                action: data.toolCall.action,
+                success: execRes.success,
+                message: execRes.message,
+              },
+            };
+          }
+
+          setMessages((prev) => extraMsg ? [...prev, botMsg, coachMsg, extraMsg] : [...prev, botMsg, coachMsg]);
         }
       } catch (error) {
         console.error("AI Coach Chat Error:", error);
-        runLocalCoachSimulation("⚠️ 真实 AI 诊断接口连接失败，已自动降级为本地模拟分析。请检查您的网络和 API 配置。\n\n");
+        runLocalCoachSimulation("⚠️ 真实 AI 诊断接口连接失败，已自动降级为本地模拟分析。请检查您的网络和 API 配置。\n\n", sentText);
       }
     } else {
-      setTimeout(() => {
-        const coachMsg: Message = {
-          id: crypto.randomUUID(),
-          sender: "coach",
-          text: "你好！我已收到你的消息。在未启动「社交演练」时，我可以回答一些关于个人成长或习惯养成的问题。若想进行高情商沟通测试，欢迎在上方设置对方角色并点击「启动演练」！",
-          timestamp: new Date(),
-        };
-        setMessages((prev) => [...prev, coachMsg]);
-      }, 800);
+      // 在未启动演练时，也支持口头习惯/打卡工具调用
+      const localTool = matchLocalRegexToolCall(sentText);
+      if (localTool) {
+        setTimeout(async () => {
+          const execRes = await executeLocalToolCall(localTool.action, localTool.params);
+          const toolMsg: Message = {
+            id: crypto.randomUUID(),
+            sender: "coach",
+            text: execRes.message,
+            timestamp: new Date(),
+            toolCallInfo: {
+              action: localTool.action,
+              success: execRes.success,
+              message: execRes.message,
+            },
+          };
+          setMessages((prev) => [...prev, toolMsg]);
+        }, 600);
+      } else {
+        setTimeout(() => {
+          const coachMsg: Message = {
+            id: crypto.randomUUID(),
+            sender: "coach",
+            text: "你好！我已收到你的消息。在未启动「社交演练」时，我也可以回答一些关于个人成长或习惯养成的问题。若想进行高情商沟通测试，欢迎在上方设置对方角色并点击「启动演练」！\n\n💡 提示：你可以直接对我说“帮我创建一个叫 健身 的习惯”或“跑步打卡”，我将自动在本地为您执行工具调用并修改数据库。",
+            timestamp: new Date(),
+          };
+          setMessages((prev) => [...prev, coachMsg]);
+        }, 800);
+      }
     }
   };
 
-  const runLocalCoachSimulation = (warningPrefix: string) => {
-    setTimeout(() => {
+  const runLocalCoachSimulation = (warningPrefix: string, text: string) => {
+    // 首先判定是否匹配上本地 Tool Calling
+    const localTool = matchLocalRegexToolCall(text);
+
+    setTimeout(async () => {
       const botResponses = [
         "哈哈，是的，我大部分工作时间都是在画板前度过的，经常会有些自我怀疑。你喜欢什么风格的画呀？",
         "感觉你的回答很有礼貌，不过平时你也会做一些类似的手工或者画画吗？",
@@ -208,7 +362,23 @@ export default function CoachView() {
         coachFeedback,
       };
 
-      setMessages((prev) => [...prev, botMsg, coachMsg]);
+      let extraMsg: Message | null = null;
+      if (localTool) {
+        const execRes = await executeLocalToolCall(localTool.action, localTool.params);
+        extraMsg = {
+          id: crypto.randomUUID(),
+          sender: "coach",
+          text: execRes.message,
+          timestamp: new Date(),
+          toolCallInfo: {
+            action: localTool.action,
+            success: execRes.success,
+            message: execRes.message,
+          },
+        };
+      }
+
+      setMessages((prev) => extraMsg ? [...prev, botMsg, coachMsg, extraMsg] : [...prev, botMsg, coachMsg]);
     }, 1000);
   };
 
@@ -233,9 +403,10 @@ export default function CoachView() {
   };
 
   return (
-    <div className="flex-1 flex flex-col h-full bg-background-void overflow-hidden">
+    <div className="flex-1 flex flex-col h-full bg-background-void overflow-hidden relative">
+      <Squares className="opacity-15 pointer-events-none" />
       {/* 顶部训练控制器 */}
-      <div className="h-16 border-b border-border-subtle bg-surface-1/40 px-6 flex items-center justify-between">
+      <div className="min-h-16 py-3 md:py-0 border-b border-border-subtle bg-surface-1/40 px-4 md:px-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 relative z-10">
         <div className="flex items-center gap-2">
           <div className="w-7 h-7 rounded-full bg-ai-blue/20 flex items-center justify-center text-ai-blue">
             <Sparkles className="w-4 h-4" />
@@ -257,17 +428,17 @@ export default function CoachView() {
             <span>终止演练</span>
           </button>
         ) : (
-          <div className="flex items-center gap-2">
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full sm:w-auto">
             <input
               type="text"
               value={roleplayTarget}
               onChange={(e) => setRoleplayTarget(e.target.value)}
               placeholder="设定对方角色 (如：暴躁的技术总监)"
-              className="px-3 h-8 bg-surface-1 border border-border-subtle rounded-lg text-xs outline-none focus:border-primary text-text-primary placeholder:text-neutral-gray"
+              className="px-3 h-8 bg-surface-1 border border-border-subtle rounded-lg text-xs outline-none focus:border-primary text-text-primary placeholder:text-neutral-gray flex-1 sm:w-[180px] md:w-[220px]"
             />
             <button
               onClick={handleStartTraining}
-              className="bg-primary hover:bg-primary-hover text-primary-text text-xs font-bold px-4 h-8 rounded-lg flex items-center gap-1 transition-all"
+              className="bg-primary hover:bg-primary-hover text-primary-text text-xs font-bold px-4 h-8 rounded-lg flex items-center justify-center gap-1 transition-all"
             >
               <span>启动演练</span>
               <ArrowRight className="w-3.5 h-3.5" />
@@ -277,7 +448,7 @@ export default function CoachView() {
       </div>
 
       {/* 对话消息区 */}
-      <div className="flex-1 overflow-y-auto p-6 space-y-4">
+      <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-4 relative z-10">
         {messages.map((msg) => {
           const isUser = msg.sender === "user";
           const isCoach = msg.sender === "coach";
@@ -288,7 +459,7 @@ export default function CoachView() {
               key={msg.id}
               className={`flex flex-col ${
                 isUser ? "items-end" : "items-start"
-              } space-y-1.5 max-w-[85%] ${isUser ? "ml-auto" : "mr-auto"}`}
+              } space-y-1.5 max-w-[92%] sm:max-w-[85%] ${isUser ? "ml-auto" : "mr-auto"}`}
             >
               {/* 头像与身份提示 */}
               <div className="flex items-center gap-1.5 text-[10px] text-text-secondary font-mono">
@@ -321,11 +492,38 @@ export default function CoachView() {
                     : "bg-surface-1 border border-border-subtle rounded-tl-none text-text-primary"
                 }`}
               >
-                {msg.text}
+                {isCoach && msg.text.includes("复盘") ? (
+                  <DecryptedText text={msg.text} speed={30} className="font-bold text-ai-blue" />
+                ) : (
+                  msg.text
+                )}
+
+                {/* AI 自动执行工具卡片 */}
+                {msg.toolCallInfo && (
+                  <SpotlightCard
+                    spotlightColor={msg.toolCallInfo.success ? "rgba(29, 185, 84, 0.2)" : "rgba(239, 68, 68, 0.2)"}
+                    className={`mt-3 border rounded-xl p-3 space-y-2 select-none relative overflow-hidden ${
+                      msg.toolCallInfo.success
+                        ? "border-primary/45 shadow-[0_0_12px_rgba(29,185,84,0.15)] text-primary"
+                        : "border-error/45 shadow-[0_0_12px_rgba(239,68,68,0.15)] text-error"
+                    }`}
+                  >
+                    <div className="flex items-center gap-1.5 font-bold font-mono text-[10px] tracking-wide uppercase">
+                      <PlusCircle className={`w-3.5 h-3.5 ${msg.toolCallInfo.success ? "text-primary animate-pulse" : "text-error"}`} />
+                      <span>AI Tool Action: {msg.toolCallInfo.action}</span>
+                    </div>
+                    <p className="text-[11px] leading-relaxed text-text-primary">
+                      {msg.toolCallInfo.message}
+                    </p>
+                    <span className="text-[9px] text-text-secondary uppercase tracking-widest font-mono block text-right mt-1">
+                      {msg.toolCallInfo.success ? "Executed Local Success" : "Execution Failed"}
+                    </span>
+                  </SpotlightCard>
+                )}
 
                 {/* 情商反馈卡片 (特有嵌套) */}
                 {msg.coachFeedback && (
-                  <div className="mt-4 bg-surface-1 border border-border-subtle rounded-lg p-3 space-y-3">
+                  <SpotlightCard spotlightColor="rgba(59, 130, 246, 0.15)" className="mt-4 border border-border-subtle rounded-lg p-3 space-y-3">
                     {/* 三维能力滑块条 */}
                     <div className="grid grid-cols-3 gap-2">
                       <div className="bg-surface-2 p-2 rounded flex flex-col gap-1 border border-border-subtle">
@@ -386,7 +584,7 @@ export default function CoachView() {
                       <PlusCircle className="w-3 h-3" />
                       <span>提炼为记忆卡片存入第二大脑</span>
                     </button>
-                  </div>
+                  </SpotlightCard>
                 )}
               </div>
             </div>
@@ -396,7 +594,7 @@ export default function CoachView() {
       </div>
 
       {/* 底部输入框 */}
-      <div className="p-4 border-t border-border-subtle bg-surface-1">
+      <div className="p-4 border-t border-border-subtle bg-surface-1 relative z-10">
         <form onSubmit={handleSendMessage} className="flex gap-2">
           <input
             type="text"

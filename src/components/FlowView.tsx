@@ -19,6 +19,8 @@ import {
   Clock,
   ExternalLink,
 } from "lucide-react";
+import SpotlightCard from "./reactbits/SpotlightCard";
+import Squares from "./reactbits/Squares";
 
 export default function FlowView() {
   const {
@@ -305,9 +307,10 @@ export default function FlowView() {
   };
 
   return (
-    <div className="flex-1 flex flex-col h-full bg-background-void relative">
+    <div className="flex-1 flex flex-col h-full bg-background-void relative overflow-hidden">
+      <Squares className="opacity-10 pointer-events-none" />
       {/* 顶部退出全屏专注条 */}
-      <div className="h-14 px-6 flex items-center justify-between border-b border-border-subtle bg-surface-1/40">
+      <div className="h-14 px-6 flex items-center justify-between border-b border-border-subtle bg-surface-1/40 relative z-10">
         <button
           onClick={() => {
             setReviewMode(false);
@@ -324,7 +327,7 @@ export default function FlowView() {
       </div>
 
       {/* 主画布 (双栏或专注单栏) */}
-      <div className="flex-1 overflow-y-auto p-8 flex flex-col items-center">
+      <div className="flex-1 overflow-y-auto p-4 md:p-8 flex flex-col items-center relative z-10">
         {isReviewMode ? (
           // ==========================================
           // 卡片复习专注模式视图 (SM-2 flashcards)
@@ -376,7 +379,7 @@ export default function FlowView() {
                       className="w-full h-full relative preserve-3d"
                     >
                       {/* 卡片正面 */}
-                      <div className="absolute inset-0 backface-hidden bg-surface-1 border border-border-subtle hover:border-primary/40 rounded-2xl p-6 flex flex-col justify-between shadow-xl">
+                      <SpotlightCard spotlightColor="rgba(59, 130, 246, 0.15)" className="absolute inset-0 backface-hidden rounded-2xl p-6 flex flex-col justify-between shadow-xl">
                         <span className="text-[10px] font-mono tracking-widest text-text-secondary uppercase">
                           FRONT · 提示问题
                         </span>
@@ -388,12 +391,13 @@ export default function FlowView() {
                         <span className="text-[10px] text-center text-text-secondary font-mono">
                           点击卡片翻看答案
                         </span>
-                      </div>
+                      </SpotlightCard>
 
                       {/* 卡片背面 */}
-                      <div
+                      <SpotlightCard
+                        spotlightColor="rgba(59, 130, 246, 0.2)"
                         style={{ transform: "rotateY(180deg)" }}
-                        className="absolute inset-0 backface-hidden bg-surface-1 border border-border-subtle rounded-2xl p-6 flex flex-col justify-between shadow-xl"
+                        className="absolute inset-0 backface-hidden rounded-2xl p-6 flex flex-col justify-between shadow-xl"
                       >
                         <span className="text-[10px] font-mono tracking-widest text-ai-blue font-bold uppercase">
                           BACK · 核心解答
@@ -406,7 +410,7 @@ export default function FlowView() {
                         <span className="text-[10px] text-center text-text-secondary font-mono">
                           点击卡片回到正面
                         </span>
-                      </div>
+                      </SpotlightCard>
                     </motion.div>
                   </div>
 
@@ -450,7 +454,7 @@ export default function FlowView() {
           // ==========================================
           <div className="w-full max-w-[800px] grid grid-cols-1 md:grid-cols-5 gap-8 pt-4">
             {/* 左侧番茄钟区域 (占 2/5) */}
-            <div className="md:col-span-2 flex flex-col items-center gap-6 bg-surface-1 border border-border-subtle p-6 rounded-2xl h-fit">
+            <SpotlightCard spotlightColor="rgba(29, 185, 84, 0.15)" className="md:col-span-2 flex flex-col items-center gap-6 p-6 rounded-2xl h-fit">
               <span className="text-xs font-bold uppercase tracking-widest text-text-secondary font-mono flex items-center gap-1.5">
                 <Clock className="w-3.5 h-3.5 text-primary" /> Focus Timer
               </span>
@@ -569,7 +573,7 @@ export default function FlowView() {
                   </div>
                 )}
               </div>
-            </div>
+            </SpotlightCard>
 
             {/* 右侧费曼看板区域 (占 3/5) */}
             <div className="md:col-span-3 space-y-6">
@@ -583,7 +587,7 @@ export default function FlowView() {
               </div>
 
               {/* 输入框 */}
-              <div className="space-y-4 bg-surface-1 border border-border-subtle p-5 rounded-2xl">
+              <SpotlightCard spotlightColor="rgba(29, 185, 84, 0.12)" className="space-y-4 p-5 rounded-2xl">
                 <div className="space-y-1.5">
                   <label className="text-[10px] uppercase font-bold tracking-widest text-primary font-mono block">
                     解释目标概念
@@ -631,17 +635,12 @@ export default function FlowView() {
                     </>
                   )}
                 </button>
-              </div>
+              </SpotlightCard>
 
               {/* AI 判官评审结果 */}
               <AnimatePresence>
                 {feynmanResult && (
-                  <motion.div
-                    initial={{ opacity: 0, y: 15 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: 15 }}
-                    className="bg-surface-1 border border-border-subtle p-5 rounded-2xl flex flex-col gap-4 relative overflow-hidden"
-                  >
+                  <SpotlightCard spotlightColor="rgba(59, 130, 246, 0.2)" className="p-5 rounded-2xl flex flex-col gap-4 relative overflow-hidden">
                     <div className="absolute top-0 right-0 w-2 h-full bg-ai-blue" />
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
@@ -677,7 +676,7 @@ export default function FlowView() {
                         ))}
                       </ul>
                     </div>
-                  </motion.div>
+                  </SpotlightCard>
                 )}
               </AnimatePresence>
             </div>

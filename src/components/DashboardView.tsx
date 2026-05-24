@@ -20,6 +20,9 @@ import {
   X,
   Target,
 } from "lucide-react";
+import SpotlightCard from "./reactbits/SpotlightCard";
+
+const MotionSpotlightCard = motion.create(SpotlightCard);
 
 interface DashboardViewProps {
   isWoopModalOpen: boolean;
@@ -105,6 +108,129 @@ export default function DashboardView({
   // 今日能量滑块状态
   const [energy, setEnergy] = useState<number>(5);
 
+  // 晚间灵魂复盘状态
+  const [isReviewing, setIsReviewing] = useState(false);
+  const [isReviewLoading, setIsReviewLoading] = useState(false);
+  const [reviewQuestions, setReviewQuestions] = useState<string[]>([]);
+  const [ans1, setAns1] = useState("");
+  const [ans2, setAns2] = useState("");
+  const [ans3, setAns3] = useState("");
+  const [particles, setParticles] = useState<any[]>([]);
+  const [habitParticles, setHabitParticles] = useState<Record<string, any[]>>({});
+
+  // 判定当前时间是否达到 21:00 晚间复盘最佳时间
+  const [isAfterReviewTime, setIsAfterReviewTime] = useState(false);
+  useEffect(() => {
+    const checkTime = () => {
+      const hours = new Date().getHours();
+      setIsAfterReviewTime(hours >= 21);
+    };
+    checkTime();
+    const interval = setInterval(checkTime, 60000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // 自研轻量级 Confetti 爆炸撒花效果，避免引入外部依赖
+  const triggerConfetti = () => {
+    const colors = ["#1DB954", "#3b82f6", "#f59e0b", "#ef4444", "#a855f7", "#10b981"];
+    const tempParticles = Array.from({ length: 45 }).map((_, i) => ({
+      id: i,
+      x: (Math.random() - 0.5) * 60, // 初始随机偏移
+      y: (Math.random() - 0.5) * 60,
+      color: colors[Math.floor(Math.random() * colors.length)],
+      angle: Math.random() * Math.PI * 2,
+      speed: 4 + Math.random() * 8,
+      size: 4 + Math.random() * 6,
+    }));
+    setParticles(tempParticles);
+    // 3 秒后清空粒子
+    setTimeout(() => setParticles([]), 3000);
+  };
+
+  // 开始灵魂复盘，拉取问题并支持降级
+  const handleStartReviewFlow = async () => {
+    setIsReviewing(true);
+    setIsReviewLoading(true);
+    try {
+      const payload = {
+        date: currentDate,
+        woop: {
+          wish: todayRecord?.woopWish || "",
+          outcome: todayRecord?.woopOutcome || "",
+          obstacle: todayRecord?.woopObstacle || "",
+          plan: todayRecord?.woopPlan || "",
+        },
+        energy: energy,
+        habits: habits.map((h) => ({
+          name: h.name,
+          logged: loggedHabitIds.has(h.id),
+        })),
+        cardsCount: overdueCardsCount,
+      };
+
+      const res = await fetch("/api/review", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      if (!res.ok) throw new Error("获取复盘问题失败");
+      const data = await res.json() as { questions: string[] };
+      setReviewQuestions(data.questions || []);
+    } catch (e) {
+      console.warn("AI 复盘接口请求失败，启用本地自适应问题生成器:", e);
+      // 根据打卡率生成降级本地问题
+      const total = habits.length;
+      const completed = habits.filter((h) => loggedHabitIds.has(h.id)).length;
+      const rate = total > 0 ? completed / total : 1;
+      const wishStr = todayRecord?.woopWish || "今日设定目标";
+      const obstacleStr = todayRecord?.woopObstacle || "设定障碍";
+
+      if (rate === 1) {
+        setReviewQuestions([
+          "今日达成 100% 打卡！在顺风时刻，你觉得哪个习惯给你带来了最大的心流状态？",
+          "回顾今日愿望：“" + wishStr + "”，既然已完成，明天的成长边界你打算推到哪里？",
+          "如果明天遇到突发的 3 分低能量状态，你将如何保住这一连击？有何防御计划？"
+        ]);
+      } else {
+        setReviewQuestions([
+          `今天习惯打卡率仅为 ${completed}/${total}，你的能量为 ${energy}/10。你在哪个时间节点对惰性妥协了？`,
+          `回顾今日障碍：“${obstacleStr}”，你的 If-Then 计划没起作用，核心瓶颈出在哪个行为漏斗？`,
+          `要阻断这种执行力下滑，你准备今晚对手机或作息做怎样的物理限制？明天哪一项需要减负？`
+        ]);
+      }
+    } finally {
+      setIsReviewLoading(false);
+    }
+  };
+
+  // 提交灵魂反思
+  const handleSubmitReview = async () => {
+    if (!ans1.trim() || !ans2.trim() || !ans3.trim()) {
+      alert("请完整填写这三个直击灵魂的反思问题，不要逃避哦！");
+      return;
+    }
+
+    await db.dailyRecords.put({
+      date: currentDate,
+      woopWish: todayRecord?.woopWish || "",
+      woopOutcome: todayRecord?.woopOutcome || "",
+      woopObstacle: todayRecord?.woopObstacle || "",
+      woopPlan: todayRecord?.woopPlan || "",
+      energyLevel: energy,
+      reviewQuestions: reviewQuestions,
+      reviewAnswers: [ans1, ans2, ans3],
+      reviewCompletedAt: new Date(),
+      createdAt: todayRecord?.createdAt || new Date(),
+    });
+
+    triggerConfetti();
+    setIsReviewing(false);
+    setAns1("");
+    setAns2("");
+    setAns3("");
+  };
+
   useEffect(() => {
     if (todayRecord?.energyLevel !== undefined) {
       setEnergy(todayRecord.energyLevel);
@@ -138,6 +264,24 @@ export default function DashboardView({
         date: currentDate,
         createdAt: new Date(),
       });
+      
+      // 触发局部 Check 圈圈微型 Confetti 粒子溅射
+      const colors = ["#1DB954", "#1ED760", "#3b82f6", "#10b981"];
+      const newParticles = Array.from({ length: 15 }).map((_, idx) => ({
+        id: idx,
+        angle: (idx / 15) * Math.PI * 2 + (Math.random() - 0.5) * 0.3,
+        speed: 5 + Math.random() * 6,
+        color: colors[Math.floor(Math.random() * colors.length)]
+      }));
+      setHabitParticles((prev) => ({ ...prev, [habitId]: newParticles }));
+      // 1 秒后自动清除该习惯下的粒子，以便下次再次打卡时重复触发
+      setTimeout(() => {
+        setHabitParticles((prev) => {
+          const next = { ...prev };
+          delete next[habitId];
+          return next;
+        });
+      }, 1000);
     }
   };
 
@@ -208,7 +352,36 @@ export default function DashboardView({
   }, [currentDate]);
 
   return (
-    <div className="flex-1 overflow-y-auto px-8 py-6 space-y-6">
+    <div className="flex-1 overflow-y-auto px-4 py-4 md:px-8 md:py-6 space-y-6 relative">
+      {/* 粒子撒花层 */}
+      {particles.length > 0 && (
+        <div className="fixed inset-0 pointer-events-none z-50 overflow-hidden">
+          {particles.map((p) => (
+            <motion.div
+              key={p.id}
+              className="absolute left-1/2 top-1/3 rounded-full"
+              style={{
+                width: p.size,
+                height: p.size,
+                backgroundColor: p.color,
+                x: p.x,
+                y: p.y,
+              }}
+              animate={{
+                x: p.x + Math.cos(p.angle) * p.speed * 30,
+                y: p.y + Math.sin(p.angle) * p.speed * 30 + 150, // 自然抛物下坠
+                opacity: [1, 1, 0],
+                scale: [1, 1.2, 0.4],
+              }}
+              transition={{
+                duration: 2.0,
+                ease: "easeOut",
+              }}
+            />
+          ))}
+        </div>
+      )}
+
       {/* 顶部 Header Area */}
       <header className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 border-b border-border-subtle pb-6">
         <div>
@@ -256,11 +429,11 @@ export default function DashboardView({
             </h2>
             
             {todayRecord && todayRecord.woopWish ? (
-              <div className="bg-surface-1 rounded-xl p-5 border border-border-subtle relative group overflow-hidden">
+              <SpotlightCard spotlightColor="rgba(29, 185, 84, 0.15)" className="p-5 relative group overflow-hidden">
                 <div className="absolute top-0 left-0 w-1 h-full bg-primary" />
                 <button
                   onClick={() => setIsWoopModalOpen(true)}
-                  className="absolute top-4 right-4 text-xs text-text-secondary hover:text-primary transition-colors font-semibold"
+                  className="absolute top-4 right-4 text-xs text-text-secondary hover:text-primary transition-colors font-semibold z-20"
                 >
                   编辑意图
                 </button>
@@ -294,7 +467,7 @@ export default function DashboardView({
                     </p>
                   </div>
                 </div>
-              </div>
+              </SpotlightCard>
             ) : (
               <button
                 onClick={() => setIsWoopModalOpen(true)}
@@ -330,17 +503,18 @@ export default function DashboardView({
                   const isRecommended = habit.energyDemand === recommendedDemand && !isLogged;
                   
                   return (
-                    <motion.div
+                    <MotionSpotlightCard
                       key={habit.id}
                       whileHover={{ scale: 1.03 }}
                       transition={{ type: "spring", stiffness: 300, damping: 20 }}
                       onClick={() => toggleHabitLog(habit.id)}
-                      className={`relative p-4 rounded-xl border cursor-pointer select-none transition-all duration-200 overflow-hidden flex items-center justify-between ${
+                      spotlightColor={isLogged ? "rgba(29, 185, 84, 0.25)" : isRecommended ? "rgba(29, 185, 84, 0.35)" : "rgba(29, 185, 84, 0.12)"}
+                      className={`relative p-4 rounded-xl border cursor-pointer select-none overflow-hidden flex items-center justify-between ${
                         isLogged
-                          ? "bg-surface-1 border-primary/40 shadow-[0_0_12px_rgba(29,185,84,0.15)]"
+                          ? "border-primary/40 shadow-[0_0_12px_rgba(29,185,84,0.15)]"
                           : isRecommended
-                          ? "bg-surface-1 border-primary shadow-[0_0_15px_rgba(29,185,84,0.25)]"
-                          : "bg-surface-1 border-border-subtle hover:border-text-secondary"
+                          ? "border-primary shadow-[0_0_15px_rgba(29,185,84,0.25)]"
+                          : "border-border-subtle hover:border-text-secondary"
                       }`}
                     >
                       <div className="flex items-center gap-3">
@@ -369,17 +543,34 @@ export default function DashboardView({
                             当前最宜
                           </span>
                         )}
-                        <div
-                          className={`w-6 h-6 rounded-full border flex items-center justify-center transition-all ${
-                            isLogged
-                              ? "bg-primary border-primary text-black"
-                              : "border-muted-gray group-hover:border-text-secondary bg-transparent"
-                          }`}
-                        >
-                          {isLogged && <Check className="w-3.5 h-3.5 stroke-[3]" />}
+                        <div className="relative flex items-center justify-center w-6 h-6">
+                          {/* 局部打卡 Confetti 特效 */}
+                          {habitParticles[habit.id] && habitParticles[habit.id].map((p) => (
+                            <motion.div
+                              key={p.id}
+                              className="absolute w-1 h-1 rounded-full pointer-events-none z-10"
+                              style={{ backgroundColor: p.color }}
+                              animate={{
+                                x: Math.cos(p.angle) * p.speed * 3.5,
+                                y: Math.sin(p.angle) * p.speed * 3.5,
+                                scale: [1, 1.2, 0.1],
+                                opacity: [1, 1, 0]
+                              }}
+                              transition={{ duration: 0.8, ease: "easeOut" }}
+                            />
+                          ))}
+                          <div
+                            className={`w-full h-full rounded-full border flex items-center justify-center transition-all ${
+                              isLogged
+                                ? "bg-primary border-primary text-black"
+                                : "border-muted-gray group-hover:border-text-secondary bg-transparent"
+                            }`}
+                          >
+                            {isLogged && <Check className="w-3.5 h-3.5 stroke-[3]" />}
+                          </div>
                         </div>
                       </div>
-                    </motion.div>
+                    </MotionSpotlightCard>
                   );
                 })}
               </div>
@@ -390,7 +581,7 @@ export default function DashboardView({
         {/* 右侧小列 (占比 40% -> 2/5) */}
         <div className="lg:col-span-2 space-y-6">
           {/* SM-2 记忆卡片复习引导 */}
-          <section className="bg-surface-1 p-5 rounded-xl border border-border-subtle flex flex-col gap-4">
+          <SpotlightCard spotlightColor="rgba(59, 130, 246, 0.15)" className="p-5 flex flex-col gap-4">
             <div className="flex items-center justify-between">
               <span className="text-xs font-bold uppercase tracking-widest text-text-secondary font-mono flex items-center gap-2">
                 <BookOpen className="w-4 h-4 text-ai-blue" /> 记忆卡片队列
@@ -423,11 +614,11 @@ export default function DashboardView({
               <span>开始复习</span>
               <ArrowRight className="w-3.5 h-3.5" />
             </button>
-          </section>
+          </SpotlightCard>
 
           {/* AI 教练洞察 */}
-          <section className="bg-gradient-to-br from-surface-1 to-surface-2 p-5 rounded-xl border border-border-subtle flex flex-col gap-4 relative overflow-hidden">
-            <div className="absolute -right-6 -bottom-6 w-24 h-24 bg-ai-blue/10 rounded-full blur-2xl" />
+          <SpotlightCard spotlightColor="rgba(59, 130, 246, 0.25)" className="p-5 flex flex-col gap-4 relative overflow-hidden">
+            <div className="absolute -right-6 -bottom-6 w-24 h-24 bg-ai-blue/10 rounded-full blur-2xl z-0" />
             <div className="flex items-center gap-2">
               <div className="w-6 h-6 rounded-full bg-ai-blue/20 flex items-center justify-center">
                 <Sparkles className="w-3.5 h-3.5 text-ai-blue" />
@@ -457,7 +648,135 @@ export default function DashboardView({
                 忽略
               </button>
             </div>
-          </section>
+          </SpotlightCard>
+
+          {/* AI 晚间灵魂复盘卡片 */}
+          <SpotlightCard
+            spotlightColor={todayRecord?.reviewCompletedAt ? "rgba(29, 185, 84, 0.15)" : isAfterReviewTime ? "rgba(29, 185, 84, 0.3)" : "rgba(29, 185, 84, 0.12)"}
+            className={`p-5 relative transition-all duration-300 ${
+              todayRecord?.reviewCompletedAt
+                ? "border-primary/20"
+                : isAfterReviewTime
+                ? "border-primary shadow-[0_0_15px_rgba(29,185,84,0.15)] animate-pulse-slow"
+                : "border-border-subtle"
+            }`}
+          >
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold uppercase tracking-widest text-text-secondary font-mono flex items-center gap-2">
+                <Target className="w-4 h-4 text-primary" /> 晚间灵魂复盘 (Nightly Reflection)
+              </span>
+              
+              {todayRecord?.reviewCompletedAt ? (
+                <span className="text-[10px] bg-primary/20 text-primary font-bold px-2 py-0.5 rounded-full uppercase tracking-wider">
+                  已完成复盘 🔥
+                </span>
+              ) : isAfterReviewTime ? (
+                <span className="text-[10px] bg-primary/25 text-primary font-bold px-2 py-0.5 rounded-full uppercase tracking-wider">
+                  推荐开启
+                </span>
+              ) : (
+                <span className="text-[10px] bg-surface-3 text-text-secondary font-bold px-2 py-0.5 rounded-full uppercase tracking-wider">
+                  21:00 最佳
+                </span>
+              )}
+            </div>
+
+            {/* 1. 复盘进行时（答题模式） */}
+            {isReviewing ? (
+              <div className="mt-4 space-y-4 z-10 relative">
+                {isReviewLoading ? (
+                  <div className="space-y-3 py-4">
+                    <div className="h-4 bg-surface-3 rounded animate-pulse w-3/4" />
+                    <div className="h-4 bg-surface-3 rounded animate-pulse w-5/6" />
+                    <div className="h-4 bg-surface-3 rounded animate-pulse w-2/3" />
+                    <p className="text-[10px] text-text-secondary font-mono">AI 正在根据今日数据构思犀利的问题...</p>
+                  </div>
+                ) : (
+                  <>
+                    <p className="text-[11px] text-ai-blue font-semibold">
+                      💡 严厉的 AI 灵魂教练已经审查完毕，请诚实作答：
+                    </p>
+                    
+                    <div className="space-y-3">
+                      {reviewQuestions.map((q, idx) => {
+                        const setAns = [setAns1, setAns2, setAns3][idx];
+                        const val = [ans1, ans2, ans3][idx];
+                        return (
+                          <div key={idx} className="space-y-1">
+                            <p className="text-xs text-text-primary font-bold font-mono">
+                              问题 {idx + 1}: {q}
+                            </p>
+                            <textarea
+                              rows={2}
+                              value={val}
+                              required
+                              onChange={(e) => setAns(e.target.value)}
+                              placeholder="写下你真实的反思和明天的改进细节..."
+                              className="w-full px-3 py-1.5 bg-surface-2 rounded-lg border border-border-subtle focus:border-primary text-xs text-text-primary outline-none resize-none font-mono"
+                            />
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    <div className="flex gap-2 pt-1">
+                      <button
+                        onClick={handleSubmitReview}
+                        className="flex-1 bg-primary hover:bg-primary-hover text-black transition-colors py-2 rounded-lg text-xs font-bold uppercase tracking-wider"
+                      >
+                        提交今日反思
+                      </button>
+                      <button
+                        onClick={() => setIsReviewing(false)}
+                        className="px-4 bg-surface-3 hover:bg-surface-2 transition-colors py-2 rounded-lg text-xs text-text-secondary"
+                      >
+                        取消
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
+            ) : todayRecord?.reviewCompletedAt ? (
+              // 2. 复盘已完成（展示模式）
+              <div className="mt-4 space-y-3.5 text-xs text-text-secondary">
+                <p className="text-xs text-text-primary leading-relaxed font-semibold">
+                  “你今天诚实地面对了自己。自律是一个反馈回路，你写下的反思已封存进第二大脑。”
+                </p>
+                <div className="space-y-2.5 bg-surface-2/60 p-3 rounded-lg border border-border-subtle">
+                  {todayRecord.reviewQuestions?.map((q, idx) => (
+                    <div key={idx} className="space-y-1">
+                      <p className="text-text-primary font-bold font-mono text-[10px]">Q: {q}</p>
+                      <p className="text-neutral-gray italic pl-2.5 border-l border-primary/30 text-[11px]">A: {todayRecord.reviewAnswers?.[idx]}</p>
+                    </div>
+                  ))}
+                </div>
+                <button
+                  onClick={handleStartReviewFlow}
+                  className="text-[10px] text-primary hover:underline font-mono"
+                >
+                  重新进行今日复盘
+                </button>
+              </div>
+            ) : (
+              // 3. 复盘就绪（未开始模式）
+              <div className="mt-4 space-y-3">
+                <p className="text-xs text-text-secondary leading-relaxed">
+                  每晚 21:00 提取今日打卡和 WOOP 状态，发送给大模型，生成 3 个犀利的个性化反思问题推送。
+                </p>
+                <button
+                  onClick={handleStartReviewFlow}
+                  className={`w-full py-2.5 rounded-full font-bold text-xs uppercase tracking-widest flex items-center justify-center gap-2 transition-all ${
+                    isAfterReviewTime
+                      ? "bg-primary text-black hover:scale-[1.03] shadow-[0_0_12px_rgba(29,185,84,0.3)]"
+                      : "bg-surface-3 text-text-secondary hover:bg-surface-2"
+                  }`}
+                >
+                  <span>立即开启今日灵魂复盘</span>
+                  <ArrowRight className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            )}
+          </SpotlightCard>
         </div>
       </div>
 
