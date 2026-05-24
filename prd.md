@@ -116,7 +116,7 @@ GrowthOS
     - AI (Roleplay)：发送一条模拟消息。
     - 用户回复后，AI 切换为 "Coach 视角"，给出反馈卡片：`[情绪价值: 8/10] [需求感: 3/10] [改进建议: ...]`。
   - **场景 B (主动干预)**：
-    - AI 发送一张 **Action Card**："检测到你今天 AI 编码时间不足 1 小时。我为你生成了一个 15 分钟的 LangGraph 小挑战。"
+    - AI 发送一张 **Action Card**："检测到你今天 AI 编码时间不足 1 小时。我为你生成了一个 15 分钟的 TypeScript 小挑战。"
     - 卡片底部有 `[Start Challenge]` 按钮，点击直接跳转到 Flow Space。
 
 ---
@@ -137,7 +137,7 @@ GrowthOS
 
 ## 五、 AI Agent 核心工作流设计 (Backend/Agent Layer)
 
-这是系统的灵魂，建议使用 **LangGraph** 或 **Mastra** 构建状态机。
+这是系统的灵魂，使用标准的 OpenAI 协议 API，通过 Next.js API Routes 配合结构化 Prompt 进行状态维护。
 
 ### Agent 1: The Reviewer (每日复盘 Agent)
 
@@ -164,7 +164,7 @@ GrowthOS
 | :---------------------- | :------- | :------------------------------------------------------------------------- | :-------------------------------------------------------- |
 | **Phase 1: MVP**        | Week 1-2 | Dashboard、习惯打卡、WOOP、基础 SM-2 卡片。数据存 LocalStorage/IndexedDB。 | 跑通 Next.js 15 + shadcn/ui + Zustand 状态管理。          |
 | **Phase 2: 记忆与输出** | Week 3-4 | Flow Space (费曼板)、Brain (基础 Markdown 笔记)、热力图与雷达图。          | 掌握 TipTap 富文本编辑器、D3.js/ECharts 复杂可视化。      |
-| **Phase 3: AI 注入**    | Week 5-6 | 接入 Mastra/LangGraph，实现 Coach Agent 和社交陪练 Agent，打通 API。       | **真正掌握 AI Agent 工程化、Tool Calling、RAG。**         |
+| **Phase 3: AI 注入**    | Week 5-6 | 对接标准 OpenAI 协议 API，开发费曼评审与社交陪练 Coach API，打通 API 交互。 | **掌握大模型标准 API 开发、Prompt 工程化、RAG。**         |
 | **Phase 4: 云端与发布** | Week 7-8 | 接入 Supabase (Auth + DB)，实现多端同步，部署到 Vercel，撰写发布文章。     | 掌握全栈架构、OAuth、云端数据同步，**产出求职王牌项目**。 |
 
 ---

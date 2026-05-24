@@ -18,7 +18,7 @@
 - **UI 组件库**：shadcn/ui (Radix UI) + Tailwind CSS (用于样式微调与组件生成)
 - **状态管理**：Zustand + immer
 - **本地数据库**：Dexie.js (IndexedDB)
-- **AI 框架**：Mastra / LangGraph (Phase 3 接入，统一使用兼容 OpenAI 协议的 API 进行模型对接)
+- **AI 注入**：标准的 OpenAI 兼容协议 API (不引入 Mastra / LangGraph 等重型框架，直接由 Next.js API Routes 对接驱动)
 - **动画库**：Framer Motion
 - **包管理器**：pnpm
 
