@@ -665,21 +665,23 @@ export default function DashboardView({
                 : "border-border-subtle"
             }`}
           >
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-bold uppercase tracking-widest text-text-secondary font-mono flex items-center gap-2">
-                <Target className="w-4 h-4 text-primary" /> 晚间灵魂复盘 (Nightly Reflection)
+            <div className="flex items-center justify-between gap-3 min-w-0">
+              <span className="text-xs font-bold uppercase tracking-widest text-text-secondary font-mono flex items-center gap-2 min-w-0 truncate">
+                <Target className="w-4 h-4 text-primary flex-shrink-0" /> 
+                <span className="truncate">晚间灵魂复盘</span>
+                <span className="hidden sm:inline opacity-75">(Nightly Reflection)</span>
               </span>
               
               {todayRecord?.reviewCompletedAt ? (
-                <span className="text-[10px] bg-primary/20 text-primary font-bold px-2 py-0.5 rounded-full uppercase tracking-wider">
+                <span className="text-[10px] bg-primary/20 text-primary font-bold px-2 py-0.5 rounded-full uppercase tracking-wider whitespace-nowrap flex-shrink-0">
                   已完成复盘 🔥
                 </span>
               ) : isAfterReviewTime ? (
-                <span className="text-[10px] bg-primary/25 text-primary font-bold px-2 py-0.5 rounded-full uppercase tracking-wider">
+                <span className="text-[10px] bg-primary/25 text-primary font-bold px-2 py-0.5 rounded-full uppercase tracking-wider whitespace-nowrap flex-shrink-0">
                   推荐开启
                 </span>
               ) : (
-                <span className="text-[10px] bg-surface-3 text-text-secondary font-bold px-2 py-0.5 rounded-full uppercase tracking-wider">
+                <span className="text-[10px] bg-surface-3 text-text-secondary font-bold px-2 py-0.5 rounded-full uppercase tracking-wider whitespace-nowrap flex-shrink-0">
                   21:00 最佳
                 </span>
               )}
