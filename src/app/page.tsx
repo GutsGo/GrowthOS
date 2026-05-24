@@ -1,65 +1,266 @@
-import Image from "next/image";
+"use client";
+
+import React, { useEffect, useState } from "react";
+import { useAppStore, AppTab } from "@/lib/store";
+import { db } from "@/lib/db";
+import CommandPalette from "@/components/CommandPalette";
+import DashboardView from "@/components/DashboardView";
+import FlowView from "@/components/FlowView";
+import BrainView from "@/components/BrainView";
+import CoachView from "@/components/CoachView";
+import StatsView from "@/components/StatsView";
+import SettingsView from "@/components/SettingsView";
+import {
+  Flame,
+  Zap,
+  BookOpen,
+  Sparkles,
+  Layers,
+  Settings,
+  Command,
+  PlusCircle,
+  Sun,
+  Moon,
+} from "lucide-react";
 
 export default function Home() {
+  const {
+    activeTab,
+    setActiveTab,
+    isCommandPaletteOpen,
+    setCommandPaletteOpen,
+    toggleCommandPalette,
+    theme,
+    setTheme,
+  } = useAppStore();
+
+  const [isWoopModalOpen, setIsWoopModalOpen] = useState(false);
+
+  // 0. 初始化全局主题 (本地持久化)
+  useEffect(() => {
+    const savedTheme = (localStorage.getItem("theme") as "light" | "dark") || "dark";
+    setTheme(savedTheme);
+    if (savedTheme === "dark") {
+      document.documentElement.classList.add("dark");
+    } else {
+      document.documentElement.classList.remove("dark");
+    }
+  }, [setTheme]);
+
+  const toggleTheme = () => {
+    const nextTheme = theme === "dark" ? "light" : "dark";
+    setTheme(nextTheme);
+    localStorage.setItem("theme", nextTheme);
+    if (nextTheme === "dark") {
+      document.documentElement.classList.add("dark");
+    } else {
+      document.documentElement.classList.remove("dark");
+    }
+  };
+
+  // 1. 初始化数据库默认数据（冷启动）
+  useEffect(() => {
+    const initDatabase = async () => {
+      try {
+        const habitCount = await db.habits.count();
+        if (habitCount === 0) {
+          await db.habits.bulkAdd([
+            {
+              id: "habit-1",
+              name: "AI 编码深度训练",
+              icon: "Code",
+              frequency: "daily",
+              energyDemand: "high",
+              createdAt: new Date(),
+            },
+            {
+              id: "habit-2",
+              name: "英语口语表达演练",
+              icon: "MessageSquare",
+              frequency: "daily",
+              energyDemand: "low",
+              createdAt: new Date(),
+            },
+            {
+              id: "habit-3",
+              name: "三分化力量拉伸",
+              icon: "Activity",
+              frequency: "daily",
+              energyDemand: "high",
+              createdAt: new Date(),
+            },
+            {
+              id: "habit-4",
+              name: "高情商社交话术练习",
+              icon: "User",
+              frequency: "daily",
+              energyDemand: "medium",
+              createdAt: new Date(),
+            },
+          ]);
+        }
+
+        const cardCount = await db.cards.count();
+        if (cardCount === 0) {
+          await db.cards.bulkAdd([
+            {
+              id: "card-1",
+              front: "什么是 AI Agent 的 ReAct 模式？",
+              back: "ReAct (Reason + Action) 是一种大模型提示词工程和决策机制。LLM 交替进行‘推理’（思考现状、下一步计划）与‘行动’（调用外部工具 API 并获得 Observation），实现闭环的自主控制流。",
+              tags: ["AI", "Agent", "方法论"],
+              reps: 0,
+              interval: 0,
+              ease: 2.5,
+              nextReview: new Date(),
+              createdAt: new Date(),
+            },
+            {
+              id: "card-2",
+              front: "费曼学习法的核心四步骤是什么？",
+              back: "1. 选择目标概念并系统性学习；\n2. 尝试将该概念以最通俗的语言向完全不懂的小白解释（降维输出）；\n3. 在卡壳、无法合理解释的地方重新查阅原资料（纠错与查漏补缺）；\n4. 简化并加入类比，建立直观的逻辑联系。",
+              tags: ["学习科学", "费曼"],
+              reps: 0,
+              interval: 0,
+              ease: 2.5,
+              nextReview: new Date(),
+              createdAt: new Date(),
+            },
+          ]);
+        }
+      } catch (err) {
+        console.error("初始化 IndexedDB 数据失败: ", err);
+      }
+    };
+    initDatabase();
+  }, []);
+
+  // 2. 监听全局快捷键 Cmd+K
+  useEffect(() => {
+    const handleGlobalKeys = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "k") {
+        e.preventDefault();
+        toggleCommandPalette();
+      }
+    };
+    window.addEventListener("keydown", handleGlobalKeys);
+    return () => window.removeEventListener("keydown", handleGlobalKeys);
+  }, [toggleCommandPalette]);
+
+  // 渲染匹配的子页面 View
+  const renderContentView = () => {
+    switch (activeTab) {
+      case "dashboard":
+        return (
+          <DashboardView
+            isWoopModalOpen={isWoopModalOpen}
+            setIsWoopModalOpen={setIsWoopModalOpen}
+          />
+        );
+      case "flow":
+        return <FlowView />;
+      case "brain":
+        return <BrainView />;
+      case "coach":
+        return <CoachView />;
+      case "stats":
+        return <StatsView />;
+      case "settings":
+        return <SettingsView />;
+      default:
+        return <DashboardView isWoopModalOpen={isWoopModalOpen} setIsWoopModalOpen={setIsWoopModalOpen} />;
+    }
+  };
+
+  const navLinks: { tab: AppTab; label: string; icon: React.ReactNode }[] = [
+    { tab: "dashboard", label: "今日指挥舱", icon: <Flame className="w-4 h-4" /> },
+    { tab: "flow", label: "专注与输出", icon: <Zap className="w-4 h-4" /> },
+    { tab: "brain", label: "第二大脑", icon: <BookOpen className="w-4 h-4" /> },
+    { tab: "coach", label: "AI 教练舱", icon: <Sparkles className="w-4 h-4" /> },
+    { tab: "stats", label: "数据与复盘", icon: <Layers className="w-4 h-4" /> },
+    { tab: "settings", label: "系统设置", icon: <Settings className="w-4 h-4" /> },
+  ];
+
+  // 在 Flow Space 专注模式下隐藏侧边栏，提供沉浸感
+  const isFullScreenMode = activeTab === "flow";
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
+    <div className="flex h-screen w-screen overflow-hidden bg-background-void text-text-primary">
+      {/* 侧边导航栏 (Sidebar) - 在沉浸式 Flow Space 下折叠隐藏 */}
+      {!isFullScreenMode && (
+        <aside className="w-[240px] flex-shrink-0 bg-surface-1 flex flex-col border-r border-border-subtle">
+          {/* Logo 区域 */}
+          <div className="h-16 flex items-center px-6 border-b border-border-subtle gap-2">
+            <div className="w-6 h-6 rounded-md bg-primary flex items-center justify-center">
+              <span className="text-black font-extrabold text-sm">G</span>
+            </div>
+            <span className="font-extrabold tracking-tight text-lg text-text-primary">
+              Growth<span className="text-primary">OS</span>
+            </span>
+          </div>
+
+          {/* 导航项 */}
+          <nav className="flex-1 py-4 px-3 space-y-1">
+            {navLinks.map((link) => {
+              const isActive = activeTab === link.tab;
+              return (
+                <button
+                  key={link.tab}
+                  onClick={() => setActiveTab(link.tab)}
+                  className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-semibold transition-all duration-200 group relative ${
+                    isActive
+                      ? "text-primary bg-surface-1"
+                      : "text-text-secondary hover:text-text-primary hover:bg-surface-1/55"
+                  }`}
+                >
+                  <span className={`transition-transform duration-200 group-hover:scale-110 ${isActive ? "text-primary" : "text-text-secondary"}`}>
+                    {link.icon}
+                  </span>
+                  <span>{link.label}</span>
+                  {isActive && (
+                    <span className="absolute right-3 w-1.5 h-1.5 rounded-full bg-primary" />
+                  )}
+                </button>
+              );
+            })}
+          </nav>
+
+          {/* 快捷引导与操作 */}
+          <div className="p-4 border-t border-border-subtle space-y-2">
+            <button
+              onClick={() => setCommandPaletteOpen(true)}
+              className="w-full flex items-center justify-between px-3 py-2 rounded-lg bg-surface-1 hover:bg-surface-2 border border-border-subtle text-xs text-text-secondary hover:text-text-primary transition-colors duration-150"
             >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
+              <div className="flex items-center gap-2">
+                <Command className="w-3.5 h-3.5" />
+                <span>指令面板</span>
+              </div>
+              <span className="font-mono text-[10px] bg-surface-3 px-1 py-0.5 rounded border border-border-subtle">
+                ⌘K
+              </span>
+            </button>
+            <button
+              onClick={toggleTheme}
+              className="w-full flex items-center justify-between px-3 py-2 rounded-lg bg-surface-1 hover:bg-surface-2 border border-border-subtle text-xs text-text-secondary hover:text-text-primary transition-colors duration-150"
             >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
+              <div className="flex items-center gap-2">
+                {theme === "dark" ? <Sun className="w-3.5 h-3.5" /> : <Moon className="w-3.5 h-3.5" />}
+                <span>{theme === "dark" ? "浅色模式 (Light)" : "深色模式 (Dark)"}</span>
+              </div>
+            </button>
+            <div className="text-[10px] text-center text-text-secondary py-1 font-mono">
+              LOCAL-FIRST ARCHITECT
+            </div>
+          </div>
+        </aside>
+      )}
+
+      {/* 主视图区 (Main View) */}
+      <main className="flex-1 flex flex-col min-w-0 overflow-hidden relative bg-background-void">
+        {renderContentView()}
       </main>
+
+      {/* 全局命令面板 (Command Palette) */}
+      <CommandPalette onTriggerWoopModal={() => setIsWoopModalOpen(true)} />
     </div>
   );
 }
