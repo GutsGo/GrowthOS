@@ -5,6 +5,7 @@ import { db, Card } from "@/lib/db";
 import { useLiveQuery } from "dexie-react-hooks";
 import { useEditor, EditorContent } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
+import { motion, AnimatePresence } from "framer-motion";
 import {
   BookOpen,
   Plus,
@@ -36,11 +37,21 @@ export default function BrainView() {
 
   const [selectedCardId, setSelectedCardId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
+  const [brainSubTab, setBrainSubTab] = useState<"list" | "editor" | "graph">("list");
 
   // 编辑器表单状态
   const [front, setFront] = useState("");
   const [back, setBack] = useState("");
   const [tagsInput, setTagsInput] = useState("");
+
+  // AI 闪卡提取状态与 Toast 提示
+  const [selectedText, setSelectedText] = useState("");
+  const [isExtracting, setIsExtracting] = useState(false);
+  const [toast, setToast] = useState<{ show: boolean; msg: string; type: "success" | "error" }>({
+    show: false,
+    msg: "",
+    type: "success",
+  });
 
   // 初始化 TipTap 编辑器（为卡片背面提供富文本支持）
   const editor = useEditor({
@@ -48,6 +59,11 @@ export default function BrainView() {
     content: "",
     onUpdate: ({ editor }) => {
       setBack(editor.getHTML());
+    },
+    onSelectionUpdate: ({ editor }) => {
+      const { from, to } = editor.state.selection;
+      const text = editor.state.doc.textBetween(from, to, " ");
+      setSelectedText(text.trim());
     },
     editorProps: {
       attributes: {
@@ -73,6 +89,7 @@ export default function BrainView() {
         editor.commands.clearContent();
       }
     }
+    setSelectedText(""); // 切换卡片时重置划词
   }, [selectedCardId, cards, editor]);
 
   // 当 back 状态由外部变化时（回填表单），同步更新 TipTap 内容
@@ -96,6 +113,65 @@ export default function BrainView() {
         c.tags.some((t) => t.toLowerCase().includes(query))
     );
   }, [cards, searchQuery]);
+
+  // 调用 AI 一键提取闪卡
+  const handleExtractCards = async () => {
+    if (!selectedText || !editor) return;
+
+    setIsExtracting(true);
+    try {
+      const response = await fetch("/api/extract-cards", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: selectedText }),
+      });
+
+      if (!response.ok) {
+        throw new Error("请求闪卡提取 API 失败");
+      }
+
+      const data = await response.json() as { cards: any[]; isFallback?: boolean };
+      if (!data.cards || data.cards.length === 0) {
+        throw new Error("未提取到任何有效卡片");
+      }
+
+      const newCards = data.cards.map((c: any) => ({
+        id: crypto.randomUUID(),
+        front: c.front,
+        back: c.back,
+        tags: c.tags && c.tags.length > 0 ? c.tags : ["AI提取"],
+        reps: 0,
+        interval: 0,
+        ease: 2.5,
+        nextReview: new Date(),
+        createdAt: new Date(),
+      }));
+
+      await db.cards.bulkAdd(newCards);
+
+      // 清除选区，让光标停留在原选区终点
+      const { to } = editor.state.selection;
+      editor.commands.setTextSelection({ from: to, to: to });
+      setSelectedText("");
+
+      setToast({
+        show: true,
+        msg: `✨ AI 成功提炼并存入 ${newCards.length} 张记忆卡片！${data.isFallback ? "（已启用本地降级）" : ""}`,
+        type: "success",
+      });
+    } catch (err: any) {
+      console.error(err);
+      setToast({
+        show: true,
+        msg: `❌ 提炼失败：${err.message || "未知错误"}`,
+        type: "error",
+      });
+    } finally {
+      setIsExtracting(false);
+      // 4秒后自动关闭 Toast
+      setTimeout(() => setToast((prev) => ({ ...prev, show: false })), 4000);
+    }
+  };
 
   // 从 Markdown 或者是 HTML 富文本中提取双向引用的卡片正面标题
   const extractLinkedCards = (text: string): string[] => {
@@ -157,6 +233,7 @@ export default function BrainView() {
     if (editor) {
       editor.commands.clearContent();
     }
+    setBrainSubTab("list");
   };
 
   // 删除卡片
@@ -337,9 +414,33 @@ export default function BrainView() {
   }, [links, nodes.length]);
 
   return (
-    <div className="flex-1 flex overflow-hidden">
+    <div className="flex-1 flex flex-col md:flex-row overflow-hidden">
+      {/* 移动端局部子 Tab 导航栏 (Brain Sub-Tabs) - 仅在小屏 (md以下) 显示 */}
+      <div className="flex border-b border-border-subtle bg-surface-1 md:hidden flex-shrink-0">
+        {[
+          { id: "list", label: "卡片列表" },
+          { id: "editor", label: "卡片编辑" },
+          { id: "graph", label: "知识图谱" },
+        ].map((tab) => (
+          <button
+            key={tab.id}
+            type="button"
+            onClick={() => setBrainSubTab(tab.id as any)}
+            className={`flex-1 py-3 text-xs font-bold border-b-2 transition-all ${
+              brainSubTab === tab.id
+                ? "border-primary text-primary"
+                : "border-transparent text-text-secondary hover:text-text-primary"
+            }`}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
       {/* 1. 左栏：卡片过滤列表 (占 30% 宽度) */}
-      <div className="w-[280px] bg-surface-2/40 border-r border-border-subtle flex flex-col flex-shrink-0">
+      <div className={`w-full md:w-[280px] bg-surface-2/40 md:border-r border-border-subtle flex flex-col flex-shrink-0 ${
+        brainSubTab === "list" ? "flex" : "hidden md:flex"
+      }`}>
         <div className="p-4 border-b border-border-subtle flex flex-col gap-2">
           <h2 className="text-xs font-bold uppercase tracking-widest text-text-secondary font-mono flex items-center gap-2">
             <BookOpen className="w-3.5 h-3.5 text-primary" /> 卡片记忆库
@@ -369,7 +470,10 @@ export default function BrainView() {
               return (
                 <div
                   key={card.id}
-                  onClick={() => setSelectedCardId(card.id)}
+                  onClick={() => {
+                    setSelectedCardId(card.id);
+                    setBrainSubTab("editor"); // 点击卡片自动切到编辑
+                  }}
                   className={`p-3 rounded-lg cursor-pointer transition-colors select-none relative group ${
                     isSelected ? "bg-surface-1 text-primary" : "hover:bg-surface-1/40"
                   }`}
@@ -406,7 +510,10 @@ export default function BrainView() {
         {/* 新建卡片按钮 */}
         <div className="p-3 border-t border-border-subtle bg-surface-1">
           <button
-            onClick={() => setSelectedCardId(null)}
+            onClick={() => {
+              setSelectedCardId(null);
+              setBrainSubTab("editor"); // 点击新建自动切到编辑
+            }}
             className="w-full flex items-center justify-center gap-2 py-2 rounded-lg bg-surface-1 border border-border-subtle hover:border-primary text-xs font-bold transition-all text-text-primary"
           >
             <Plus className="w-4 h-4 text-primary" />
@@ -416,7 +523,9 @@ export default function BrainView() {
       </div>
 
       {/* 2. 中栏：卡片编辑器 (占主面积) */}
-      <div className="flex-1 overflow-y-auto p-6 space-y-6 flex flex-col">
+      <div className={`flex-1 overflow-y-auto p-4 md:p-6 space-y-6 flex flex-col ${
+        brainSubTab === "editor" ? "flex" : "hidden md:flex"
+      }`}>
         <div>
           <h1 className="text-2xl font-extrabold tracking-tight">第二大脑 (Brain Space)</h1>
           <p className="text-xs text-text-secondary mt-1">
@@ -424,7 +533,7 @@ export default function BrainView() {
           </p>
         </div>
 
-        <form onSubmit={handleSaveCard} className="space-y-4 bg-surface-1 border border-border-subtle p-5 rounded-2xl">
+        <form onSubmit={handleSaveCard} className="space-y-4 bg-surface-1 border border-border-subtle p-4 md:p-5 rounded-2xl">
           <h2 className="text-xs font-mono font-bold uppercase tracking-widest text-primary flex items-center gap-1.5">
             <Sparkles className="w-3.5 h-3.5 text-primary" />
             {selectedCardId ? "编辑卡片 (Edit Card)" : "创建卡片 (Create Card)"}
@@ -449,7 +558,45 @@ export default function BrainView() {
               背面 核心解答 (Back - 支持 Markdown 与 [[双向链接]])
             </label>
             {editor ? (
-              <EditorContent editor={editor} />
+              <>
+                <EditorContent editor={editor} />
+                {/* AI 提取闪卡工具栏 */}
+                <div className="mt-2 p-3 bg-surface-2/40 border border-border-subtle/60 rounded-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                  <div className="flex-1">
+                    <span className="text-[10px] text-ai-blue uppercase tracking-widest font-mono font-bold block mb-0.5">
+                      ✨ AI 划词闪卡生成器
+                    </span>
+                    <p className="text-[11px] text-text-secondary leading-relaxed">
+                      {selectedText 
+                        ? `已选中 ${selectedText.length} 个字符，点此一键提炼 Q&A 闪卡` 
+                        : "在上方编辑器中用鼠标划词选中段落，AI 将自动提取 1-3 张记忆闪卡"}
+                    </p>
+                  </div>
+                  
+                  <button
+                    type="button"
+                    disabled={!selectedText || isExtracting}
+                    onClick={handleExtractCards}
+                    className={`px-4 py-2 rounded-full text-[11px] font-bold uppercase tracking-wider flex items-center gap-1.5 transition-all duration-300 relative ${
+                      selectedText && !isExtracting
+                        ? "bg-ai-blue text-white shadow-[0_0_15px_rgba(59,130,246,0.3)] hover:scale-[1.04] hover:shadow-[0_0_20px_rgba(59,130,246,0.5)] active:scale-[0.98]"
+                        : "bg-surface-3 text-text-secondary cursor-not-allowed"
+                    }`}
+                  >
+                    {isExtracting ? (
+                      <>
+                        <div className="w-3 h-3 border-2 border-white/20 border-t-white rounded-full animate-spin" />
+                        <span>提取中...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles className="w-3.5 h-3.5" />
+                        <span>AI 一键提取</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </>
             ) : (
               <textarea
                 required
@@ -485,21 +632,28 @@ export default function BrainView() {
             >
               {selectedCardId ? "保存修改" : "保存至第二大脑"}
             </button>
-            {selectedCardId && (
-              <button
-                type="button"
-                onClick={() => setSelectedCardId(null)}
-                className="px-6 bg-surface-3 hover:bg-surface-2 transition-colors rounded-full text-xs font-semibold"
-              >
-                取消
-              </button>
-            )}
+            <button
+              type="button"
+              onClick={() => {
+                setSelectedCardId(null);
+                setFront("");
+                setBack("");
+                setTagsInput("");
+                if (editor) editor.commands.clearContent();
+                setBrainSubTab("list"); // 取消返回列表
+              }}
+              className="px-6 bg-surface-3 hover:bg-surface-2 transition-colors rounded-full text-xs font-semibold"
+            >
+              取消
+            </button>
           </div>
         </form>
       </div>
 
       {/* 3. 右栏：局部知识图谱 (Graph View，占 360px 宽度) */}
-      <div className="w-[360px] bg-surface-2/40 border-l border-border-subtle flex flex-col flex-shrink-0 overflow-hidden">
+      <div className={`w-full md:w-[360px] bg-surface-2/40 md:border-l border-border-subtle flex flex-col flex-shrink-0 overflow-hidden ${
+        brainSubTab === "graph" ? "flex" : "hidden md:flex"
+      }`}>
         <div className="p-4 border-b border-border-subtle flex flex-col gap-1">
           <h2 className="text-xs font-bold uppercase tracking-widest text-text-secondary font-mono flex items-center gap-2">
             <LinkIcon className="w-3.5 h-3.5 text-primary" /> 局部知识网图 (Graph)
@@ -509,7 +663,7 @@ export default function BrainView() {
           </p>
         </div>
 
-        <div className="flex-1 flex items-center justify-center bg-surface-1/10 relative">
+        <div className="flex-1 flex items-center justify-center bg-surface-1/10 relative p-4">
           {nodes.length === 0 ? (
             <div className="text-[11px] text-neutral-gray flex flex-col items-center gap-1">
               <HelpCircle className="w-6 h-6 stroke-[1.5]" />
@@ -518,9 +672,8 @@ export default function BrainView() {
           ) : (
             <svg
               ref={svgRef}
-              width={width}
-              height={height}
-              className="overflow-visible select-none"
+              viewBox={`0 0 ${width} ${height}`}
+              className="w-full max-w-[360px] h-auto overflow-visible select-none"
             >
               {/* 渲染连接边 */}
               {links.map((link, idx) => {
@@ -532,14 +685,14 @@ export default function BrainView() {
                 
                 return (
                   <line
-                    key={idx}
-                    x1={sNode.x}
-                    y1={sNode.y}
-                    x2={tNode.x}
-                    y2={tNode.y}
-                    stroke={isHighlighted ? "#1DB954" : "#282828"}
-                    strokeWidth={isHighlighted ? 1.5 : 1}
-                    strokeOpacity={isHighlighted ? 0.9 : 0.4}
+                     key={idx}
+                     x1={sNode.x}
+                     y1={sNode.y}
+                     x2={tNode.x}
+                     y2={tNode.y}
+                     stroke={isHighlighted ? "#1DB954" : "#282828"}
+                     strokeWidth={isHighlighted ? 1.5 : 1}
+                     strokeOpacity={isHighlighted ? 0.9 : 0.4}
                   />
                 );
               })}
@@ -562,6 +715,7 @@ export default function BrainView() {
                     onClick={() => {
                       if (node.type === "card") {
                         setSelectedCardId(node.id);
+                        setBrainSubTab("editor"); // 图谱内点击卡片自动切换到编辑页
                       }
                     }}
                   >
@@ -609,6 +763,25 @@ export default function BrainView() {
           )}
         </div>
       </div>
+      
+      {/* Toast 提示通知层 */}
+      <AnimatePresence>
+        {toast.show && (
+          <motion.div
+            initial={{ opacity: 0, y: 50, scale: 0.9 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 20, scale: 0.95 }}
+            className={`fixed bottom-6 left-6 z-50 px-4 py-3 rounded-xl shadow-2xl border text-xs font-semibold flex items-center gap-2 font-mono ${
+              toast.type === "success"
+                ? "bg-surface-1 border-primary/40 text-primary shadow-[0_0_15px_rgba(29,185,84,0.2)]"
+                : "bg-surface-1 border-error/40 text-error shadow-[0_0_15px_rgba(239,68,68,0.2)]"
+            }`}
+          >
+            <Sparkles className={`w-4 h-4 ${toast.type === "success" ? "text-primary animate-pulse" : "text-error"}`} />
+            <span>{toast.msg}</span>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
