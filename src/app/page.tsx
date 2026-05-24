@@ -256,7 +256,7 @@ export default function Home() {
 
       {/* 侧边导航栏 (Sidebar) - 在沉浸式 Flow Space 下折叠隐藏，在移动端下隐藏 */}
       {!isFullScreenMode && (
-        <aside className="w-[240px] flex-shrink-0 bg-surface-1 flex flex-col border-r border-border-subtle hidden md:flex">
+        <aside className="w-[240px] flex-shrink-0 bg-surface-1 border-r border-border-subtle hidden md:flex md:flex-col">
           {/* Logo 区域 */}
           <div className="h-16 flex items-center px-6 border-b border-border-subtle gap-2">
             <div className="w-6 h-6 rounded-md bg-primary flex items-center justify-center">
