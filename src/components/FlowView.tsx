@@ -36,6 +36,103 @@ export default function FlowView() {
   const [isActive, setIsActive] = useState(false);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
 
+  // 白噪音播放状态管理
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const [isPlayingNoise, setIsPlayingNoise] = useState(false);
+  const [noiseType, setNoiseType] = useState<"none" | "rain" | "cafe">("none");
+  const [noiseVolume, setNoiseVolume] = useState(0.4);
+
+  const noiseSources = {
+    rain: "https://www.soundjay.com/nature/sounds/rain-07.mp3",
+    cafe: "https://www.soundjay.com/misc/sounds/ambient-dining-room-1.mp3",
+  };
+
+  // Web Audio API 警报蜂鸣音合成器
+  const playBeepAlert = () => {
+    try {
+      const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const playTone = (delay: number, duration: number, freq: number) => {
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = "sine";
+        osc.frequency.setValueAtTime(freq, audioCtx.currentTime + delay);
+        gain.gain.setValueAtTime(0.15, audioCtx.currentTime + delay);
+        gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + delay + duration);
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.start(audioCtx.currentTime + delay);
+        osc.stop(audioCtx.currentTime + delay + duration);
+      };
+      playTone(0, 0.4, 523.25); // C5
+      playTone(0.5, 0.4, 523.25);
+      playTone(1.0, 0.6, 659.25); // E5
+    } catch (err) {
+      console.error("蜂鸣警报音播放失败:", err);
+    }
+  };
+
+  // 申请浏览器推送通知权限
+  useEffect(() => {
+    if (typeof window !== "undefined" && "Notification" in window) {
+      if (Notification.permission === "default") {
+        Notification.requestPermission();
+      }
+    }
+  }, []);
+
+  const sendFocusNotification = () => {
+    if (typeof window !== "undefined" && "Notification" in window && Notification.permission === "granted") {
+      new Notification("🎯 GrowthOS 专注结束", {
+        body: "恭喜完成一次深度专注！现在请休息 5 分钟，让大脑充充电，或开始费曼输出吧。",
+      });
+    }
+  };
+
+  // 白噪音播放切换逻辑
+  useEffect(() => {
+    if (noiseType === "none") {
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current = null;
+      }
+      setIsPlayingNoise(false);
+      return;
+    }
+
+    const src = noiseSources[noiseType];
+    if (!audioRef.current) {
+      audioRef.current = new Audio(src);
+      audioRef.current.loop = true;
+    } else {
+      audioRef.current.src = src;
+    }
+
+    audioRef.current.volume = noiseVolume;
+
+    if (isPlayingNoise) {
+      audioRef.current.play().catch(err => console.log("白噪音播放需要交互授权:", err));
+    } else {
+      audioRef.current.pause();
+    }
+  }, [noiseType, isPlayingNoise]);
+
+  // 音量动态调整
+  useEffect(() => {
+    if (audioRef.current) {
+      audioRef.current.volume = noiseVolume;
+    }
+  }, [noiseVolume]);
+
+  // 离开专注或组件卸载时关闭白噪音
+  useEffect(() => {
+    return () => {
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current = null;
+      }
+    };
+  }, []);
+
   // 联动修改计时时长
   useEffect(() => {
     setSecondsLeft(flowTimerMinutes * 60);
@@ -49,7 +146,8 @@ export default function FlowView() {
           if (prev <= 1) {
             clearInterval(timerRef.current!);
             setIsActive(false);
-            // 播放个轻微提示音（可模拟）
+            playBeepAlert();
+            sendFocusNotification();
             return 0;
           }
           return prev - 1;
@@ -87,41 +185,62 @@ export default function FlowView() {
     grade: string;
   } | null>(null);
 
-  const handleFeynmanAudit = () => {
+  const handleFeynmanAudit = async () => {
     if (!feynmanTopic || !feynmanContent) return;
     setIsFeynmanAnalysing(true);
     setFeynmanResult(null);
 
-    // 模拟 AI 判官进行深度分析
-    setTimeout(() => {
-      setIsFeynmanAnalysing(false);
-      
-      // 根据长度和特定词语做简单算法分值模拟
-      const wordCount = feynmanContent.length;
-      let score = 70 + Math.min(Math.floor(wordCount / 10), 20);
-      const suggestions = [
-        "你在解释该核心要点时使用了过多的抽象学术概念，对于零基础小白来说理解门槛较高。",
-        "建议加入生动的生活实例（例如：将‘工具调用’类比为‘去餐馆根据菜单点菜’）。",
-      ];
-
-      if (feynmanContent.includes("也就是说") || feynmanContent.includes("比如")) {
-        score += 5;
-      } else {
-        suggestions.push("可以多使用‘举个例子’、‘换句话说’来增强你口语化的输出直觉。");
-      }
-
-      setFeynmanResult({
-        score: Math.min(score, 100),
-        tips: suggestions,
-        grade: score >= 90 ? "极易理解" : score >= 80 ? "基本易懂" : "较多术语",
+    try {
+      const response = await fetch("/api/feynman", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ topic: feynmanTopic, content: feynmanContent }),
       });
-    }, 2000);
+
+      if (!response.ok) throw new Error("大模型评审接口请求失败");
+
+      const data = await response.json();
+
+      if (data.error === "NO_API_KEY") {
+        runLocalFeynmanSimulation("⚠️ 未检测到 API 密钥，已自动为您降级为本地模拟分析。请在 .env.local 中配置密钥以使用真实大模型。");
+      } else if (data.error) {
+        throw new Error(data.message || "请求失败");
+      } else {
+        setFeynmanResult(data);
+      }
+    } catch (error) {
+      console.error("Feynman Audit Error:", error);
+      runLocalFeynmanSimulation("⚠️ 真实 AI 评审接口连接失败，已自动降级为本地模拟分析。请检查网络与后台服务。");
+    } finally {
+      setIsFeynmanAnalysing(false);
+    }
+  };
+
+  const runLocalFeynmanSimulation = (warningMsg: string) => {
+    const wordCount = feynmanContent.length;
+    let score = 70 + Math.min(Math.floor(wordCount / 10), 20);
+    const suggestions = [
+      warningMsg,
+      "你在解释该核心要点时使用了过多的抽象学术概念，对于零基础小白来说理解门槛较高。",
+      "建议加入生动的生活实例（例如：将‘工具调用’类比为‘去餐馆根据菜单点菜’）。",
+    ];
+
+    if (feynmanContent.includes("也就是说") || feynmanContent.includes("比如")) {
+      score += 5;
+    } else {
+      suggestions.push("可以多使用‘举个例子’、‘换句话说’来增强你口语化的输出直觉。");
+    }
+
+    setFeynmanResult({
+      score: Math.min(score, 100),
+      tips: suggestions,
+      grade: score >= 90 ? "极易理解" : score >= 80 ? "基本易懂" : "较多术语",
+    });
   };
 
   // ==========================================
   // 3. SM-2 卡片复习逻辑
   // ==========================================
-  // 查询今天及更早到期需要复习的卡片
   const reviewCards = useLiveQuery(async () => {
     const now = new Date();
     return await db.cards.filter((c) => c.nextReview <= now).toArray();
@@ -384,6 +503,71 @@ export default function FlowView() {
                     {mins}M
                   </button>
                 ))}
+              </div>
+
+              {/* 白噪音环境音量播放控制器 */}
+              <div className="w-full pt-4 border-t border-border-subtle/50 flex flex-col gap-3">
+                <div className="flex justify-between items-center text-[10px] uppercase font-bold tracking-widest text-text-secondary font-mono">
+                  <span className="flex items-center gap-1">
+                    🎧 环境白噪音
+                  </span>
+                  {noiseType !== "none" && (
+                    <span className="text-primary font-bold lowercase">
+                      {noiseType} {isPlayingNoise ? "播放中" : "已暂停"}
+                    </span>
+                  )}
+                </div>
+
+                <div className="flex gap-2 w-full">
+                  {[
+                    { type: "none" as const, label: "无" },
+                    { type: "rain" as const, label: "雨声" },
+                    { type: "cafe" as const, label: "咖啡馆" },
+                  ].map((noise) => (
+                    <button
+                      key={noise.type}
+                      onClick={() => {
+                        setNoiseType(noise.type);
+                        if (noise.type !== "none") {
+                          setIsPlayingNoise(true);
+                        } else {
+                          setIsPlayingNoise(false);
+                        }
+                      }}
+                      className={`flex-1 py-1.5 rounded-lg text-xs font-semibold border transition-all ${
+                        noiseType === noise.type
+                          ? "bg-primary text-black border-primary font-bold"
+                          : "bg-surface-2 border-transparent text-text-secondary hover:text-text-primary"
+                      }`}
+                    >
+                      {noise.label}
+                    </button>
+                  ))}
+                </div>
+
+                {noiseType !== "none" && (
+                  <div className="flex items-center justify-between gap-3 pt-1">
+                    <button
+                      onClick={() => setIsPlayingNoise(!isPlayingNoise)}
+                      className="px-3 py-1 bg-surface-3 hover:bg-surface-2 border border-border-subtle rounded-lg text-[10px] font-bold text-text-primary transition-colors"
+                    >
+                      {isPlayingNoise ? "暂停" : "播放"}
+                    </button>
+
+                    <div className="flex-1 flex items-center gap-2">
+                      <span className="text-[9px] text-text-secondary font-mono">音量</span>
+                      <input
+                        type="range"
+                        min="0.05"
+                        max="1.0"
+                        step="0.05"
+                        value={noiseVolume}
+                        onChange={(e) => setNoiseVolume(Number(e.target.value))}
+                        className="flex-1 h-1 bg-surface-3 rounded-lg appearance-none cursor-pointer accent-primary"
+                      />
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
 

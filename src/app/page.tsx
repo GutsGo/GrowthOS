@@ -32,6 +32,7 @@ export default function Home() {
     toggleCommandPalette,
     theme,
     setTheme,
+    currentDate,
   } = useAppStore();
 
   const [isWoopModalOpen, setIsWoopModalOpen] = useState(false);
@@ -133,6 +134,23 @@ export default function Home() {
     };
     initDatabase();
   }, []);
+
+  // 1.5 每日冷启动检测：若今日尚未设定 WOOP 意图，自动强制弹出设定窗口
+  useEffect(() => {
+    const checkTodayWoop = async () => {
+      try {
+        const todayRec = await db.dailyRecords.get(currentDate);
+        if (!todayRec || !todayRec.woopWish) {
+          setTimeout(() => {
+            setIsWoopModalOpen(true);
+          }, 800); // 稍微延迟 800ms 弹出以防首屏渲染闪烁
+        }
+      } catch (err) {
+        console.error("检测今日 WOOP 意图失败:", err);
+      }
+    };
+    checkTodayWoop();
+  }, [currentDate]);
 
   // 2. 监听全局快捷键 Cmd+K
   useEffect(() => {
