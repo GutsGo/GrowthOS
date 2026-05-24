@@ -1,13 +1,89 @@
 "use client";
 
-import React, { useMemo } from "react";
+import React, { useMemo, useState } from "react";
 import { db } from "@/lib/db";
 import { useLiveQuery } from "dexie-react-hooks";
-import { Layers, Flame, Target, Award, Info } from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";
+import { Layers, Flame, Target, Award, Info, Zap } from "lucide-react";
 
 export default function StatsView() {
   const habitLogs = useLiveQuery(() => db.habitLogs.toArray()) || [];
   const habits = useLiveQuery(() => db.habits.toArray()) || [];
+  const dailyRecords = useLiveQuery(() => db.dailyRecords.toArray()) || [];
+
+  // 能量波动折线图 Hover 状态
+  const [hoveredPoint, setHoveredPoint] = useState<any | null>(null);
+
+  // ==========================================
+  // 0. 7 天能量波动折线数据计算
+  // ==========================================
+  const energyTrendData = useMemo(() => {
+    const data = [];
+    const now = new Date();
+    
+    const formatDateShort = (d: Date) => {
+      const month = String(d.getMonth() + 1).padStart(2, "0");
+      const date = String(d.getDate()).padStart(2, "0");
+      return `${month}/${date}`;
+    };
+    const formatDateFull = (d: Date) => {
+      const year = d.getFullYear();
+      const month = String(d.getMonth() + 1).padStart(2, "0");
+      const date = String(d.getDate()).padStart(2, "0");
+      return `${year}-${month}-${date}`;
+    };
+
+    const recordMap = new Map<string, number>();
+    dailyRecords.forEach((rec) => {
+      if (rec.energyLevel !== undefined) {
+        recordMap.set(rec.date, rec.energyLevel);
+      }
+    });
+
+    for (let i = 6; i >= 0; i--) {
+      const temp = new Date();
+      temp.setDate(now.getDate() - i);
+      const fullStr = formatDateFull(temp);
+      const shortStr = formatDateShort(temp);
+      data.push({
+        shortStr,
+        dateStr: fullStr,
+        energy: recordMap.get(fullStr) ?? 5, // 若未填，后备默认 5 分
+      });
+    }
+    return data;
+  }, [dailyRecords]);
+
+  // 折线图 SVG 坐标映射
+  const energyChartPoints = useMemo(() => {
+    const sizeW = 320;
+    const sizeH = 160;
+    const chartW = 280;
+    const chartH = 90;
+    const padX = 20;
+    const padY = 30;
+
+    const points = energyTrendData.map((d, i) => {
+      const x = padX + i * (chartW / 6);
+      const y = padY + chartH - ((d.energy - 1) / 9) * chartH;
+      return { x, y, ...d };
+    });
+
+    const pathD = points.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x} ${p.y}`).join(" ");
+    const areaD = `${pathD} L ${points[points.length - 1].x} ${padY + chartH} L ${points[0].x} ${padY + chartH} Z`;
+
+    return {
+      sizeW,
+      sizeH,
+      chartW,
+      chartH,
+      padX,
+      padY,
+      points,
+      pathD,
+      areaD,
+    };
+  }, [energyTrendData]);
 
   // ==========================================
   // 1. GitHub 风格 12 周打卡热力图计算
@@ -157,7 +233,7 @@ export default function StatsView() {
   }, [radarScores]);
 
   return (
-    <div className="flex-1 overflow-y-auto px-8 py-6 space-y-8">
+    <div className="flex-1 overflow-y-auto px-4 py-4 md:px-8 md:py-6 space-y-8">
       {/* 顶部 Header */}
       <div>
         <span className="text-xs text-text-secondary font-mono uppercase tracking-widest">
@@ -221,9 +297,8 @@ export default function StatsView() {
 
           <div className="w-full flex justify-center py-2 relative">
             <svg
-              width={radarSvgPoints.size}
-              height={radarSvgPoints.size}
-              className="overflow-visible"
+              viewBox={`0 0 ${radarSvgPoints.size} ${radarSvgPoints.size}`}
+              className="w-full max-w-[300px] h-auto overflow-visible"
             >
               {/* 绘制背景多边形网格 */}
               {radarSvgPoints.gridPolygons.map((points, idx) => (
@@ -281,42 +356,155 @@ export default function StatsView() {
           </div>
         </section>
 
-        {/* 右栏：AI 教练特质诊断 */}
-        <section className="bg-gradient-to-br from-surface-1 to-surface-2 border border-border-subtle p-5 rounded-2xl flex flex-col justify-between gap-6 relative overflow-hidden">
-          <div className="absolute -right-8 -bottom-8 w-28 h-28 bg-primary/10 rounded-full blur-2xl" />
-          
-          <div className="space-y-4">
-            <h2 className="text-sm font-bold uppercase tracking-widest text-text-primary font-mono flex items-center gap-2">
-              <Award className="w-4 h-4 text-amber-500" /> AI 能力与习惯特质洞察
-            </h2>
+        {/* 右栏：近 7 天能量波动曲线 */}
+        <section className="bg-surface-1 border border-border-subtle p-5 rounded-2xl flex flex-col items-center gap-4 relative">
+          <h2 className="text-sm font-bold uppercase tracking-widest text-text-primary font-mono w-full text-left flex items-center gap-2">
+            <Zap className="w-4 h-4 text-primary" /> 近 7 天能量波动曲线 (Energy Trend)
+          </h2>
 
-            <div className="space-y-3">
-              <div>
-                <span className="text-[10px] text-text-secondary uppercase tracking-widest block font-mono">
-                  当前最卓越能力标签
-                </span>
-                <p className="text-sm font-bold text-primary mt-0.5">{highestTrait}</p>
-              </div>
+          <div className="w-full flex justify-center py-2 relative">
+            <svg
+              viewBox={`0 0 ${energyChartPoints.sizeW} ${energyChartPoints.sizeH}`}
+              className="w-full max-w-[320px] h-auto overflow-visible select-none"
+            >
+              {/* 定义线性渐变层 */}
+              <defs>
+                <linearGradient id="energyAreaGradient" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="#1DB954" stopOpacity={0.15} />
+                  <stop offset="100%" stopColor="#1DB954" stopOpacity={0.0} />
+                </linearGradient>
+              </defs>
 
-              <div className="pt-2 border-t border-border-subtle/50 space-y-1.5">
-                <span className="text-[10px] text-text-secondary uppercase tracking-widest block font-mono">
-                  教练复盘诊断建议 (Feynman Coach)
-                </span>
-                <p className="text-xs text-text-secondary leading-relaxed">
-                  你最近在技术深度训练上的完成率达到 90%，展现了极强的专注力。但你在社交演练和口语训练中的参与次数偏少。为了实现更均衡的自我进化，教练建议在今晚 21:00 前往 AI 教练舱开启一次模拟演练，我们可以尝试将打卡难度从“低阻力”降为最轻松的 5 分钟起步。
-                </p>
-              </div>
-            </div>
-          </div>
+              {/* 绘制背景横格线（分别代表能量 1, 4, 7, 10） */}
+              {[0, 1, 2, 3].map((idx) => {
+                const y = energyChartPoints.padY + idx * (energyChartPoints.chartH / 3);
+                const score = 10 - idx * 3;
+                return (
+                  <g key={idx}>
+                    <line
+                      x1={energyChartPoints.padX}
+                      y1={y}
+                      x2={energyChartPoints.padX + energyChartPoints.chartW}
+                      y2={y}
+                      stroke="#282828"
+                      strokeWidth={1}
+                      strokeDasharray="4 4"
+                    />
+                    <text
+                      x={energyChartPoints.padX - 8}
+                      y={y + 3}
+                      textAnchor="end"
+                      className="fill-text-secondary text-[8px] font-mono"
+                    >
+                      {score}
+                    </text>
+                  </g>
+                );
+              })}
 
-          <div className="flex items-center gap-2 bg-surface-3 p-3 rounded-lg border border-border-subtle text-[10px] text-neutral-gray leading-relaxed">
-            <Info className="w-3.5 h-3.5 text-primary flex-shrink-0" />
-            <span>
-              能力分值每晚 22:00 根据 IndexedDB 中的实际打卡频率与 SM-2 队列通关率进行后台重新计算。
-            </span>
+              {/* 面积渐变填充 */}
+              <path
+                d={energyChartPoints.areaD}
+                fill="url(#energyAreaGradient)"
+                className="transition-all duration-300"
+              />
+
+              {/* 能量折线 */}
+              <path
+                d={energyChartPoints.pathD}
+                fill="none"
+                stroke="#1DB954"
+                strokeWidth={2}
+                className="transition-all duration-300"
+              />
+
+              {/* 折线上的数据圆点 */}
+              {energyChartPoints.points.map((p, idx) => (
+                <circle
+                  key={idx}
+                  cx={p.x}
+                  cy={p.y}
+                  r={hoveredPoint?.dateStr === p.dateStr ? 6 : 4}
+                  fill={hoveredPoint?.dateStr === p.dateStr ? "#1ED760" : "#1DB954"}
+                  stroke="#121212"
+                  strokeWidth={1.5}
+                  className="cursor-pointer transition-all duration-150"
+                  onMouseEnter={() => setHoveredPoint(p)}
+                  onMouseLeave={() => setHoveredPoint(null)}
+                />
+              ))}
+
+              {/* x 轴日期标注 */}
+              {energyChartPoints.points.map((p, idx) => (
+                <text
+                  key={idx}
+                  x={p.x}
+                  y={energyChartPoints.padY + energyChartPoints.chartH + 15}
+                  textAnchor="middle"
+                  className="fill-text-secondary text-[8px] font-mono"
+                >
+                  {p.shortStr}
+                </text>
+              ))}
+            </svg>
+
+            {/* Hover 浮动 Tooltip */}
+            <AnimatePresence>
+              {hoveredPoint && (
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.9, y: 10 }}
+                  animate={{ opacity: 1, scale: 1, y: 0 }}
+                  exit={{ opacity: 0, scale: 0.95 }}
+                  className="absolute z-10 px-2.5 py-1.5 bg-surface-3 border border-border-subtle rounded-lg text-[10px] font-mono shadow-2xl flex flex-col gap-0.5 pointer-events-none"
+                  style={{
+                    left: `${hoveredPoint.x - 30}px`,
+                    top: `${hoveredPoint.y - 45}px`
+                  }}
+                >
+                  <span className="text-text-secondary">{hoveredPoint.dateStr}</span>
+                  <span className="text-primary font-bold">🔋 能量: {hoveredPoint.energy}/10</span>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
         </section>
       </div>
+
+      {/* 3. 整行：AI 教练习惯特质诊断 */}
+      <section className="bg-gradient-to-br from-surface-1 to-surface-2 border border-border-subtle p-5 rounded-2xl flex flex-col gap-4 relative overflow-hidden">
+        <div className="absolute -right-8 -bottom-8 w-28 h-28 bg-primary/10 rounded-full blur-2xl" />
+        
+        <div className="space-y-4">
+          <h2 className="text-sm font-bold uppercase tracking-widest text-text-primary font-mono flex items-center gap-2">
+            <Award className="w-4 h-4 text-amber-500" /> AI 能力与习惯特质洞察 (AI Insights)
+          </h2>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div className="md:col-span-1 bg-surface-2/40 p-4 rounded-xl border border-border-subtle/50">
+              <span className="text-[10px] text-text-secondary uppercase tracking-widest block font-mono">
+                当前最卓越能力标签
+              </span>
+              <p className="text-sm font-bold text-primary mt-1">{highestTrait}</p>
+            </div>
+
+            <div className="md:col-span-2 space-y-1.5">
+              <span className="text-[10px] text-text-secondary uppercase tracking-widest block font-mono">
+                教练复盘诊断建议 (Feynman Coach)
+              </span>
+              <p className="text-xs text-text-secondary leading-relaxed">
+                你最近在技术深度训练上的完成率较高，展现了极强的专注力。但你在社交演练和口语训练中的参与次数偏少。为了实现更均衡的自我进化，教练建议在今晚 21:00 前往 AI 教练舱开启一次模拟演练，我们可以尝试将打卡难度从“低阻力”降为最轻松的 5 分钟起步。
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2 bg-surface-3 p-3 rounded-lg border border-border-subtle text-[10px] text-neutral-gray leading-relaxed mt-2">
+          <Info className="w-3.5 h-3.5 text-primary flex-shrink-0" />
+          <span>
+            能力分值与能量波动每晚根据 IndexedDB 中的实际打卡频率与大模型晚间复盘数据进行后台重新计算更新。
+          </span>
+        </div>
+      </section>
     </div>
   );
 }
