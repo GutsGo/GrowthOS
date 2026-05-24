@@ -10,6 +10,7 @@ import BrainView from "@/components/BrainView";
 import CoachView from "@/components/CoachView";
 import StatsView from "@/components/StatsView";
 import SettingsView from "@/components/SettingsView";
+import { motion, AnimatePresence } from "framer-motion";
 import {
   Flame,
   Zap,
@@ -201,11 +202,61 @@ export default function Home() {
   // 在 Flow Space 专注模式下隐藏侧边栏，提供沉浸感
   const isFullScreenMode = activeTab === "flow";
 
+  const getTabTitle = (tab: AppTab) => {
+    switch (tab) {
+      case "dashboard":
+        return "今日指挥舱";
+      case "flow":
+        return "专注与输出";
+      case "brain":
+        return "第二大脑";
+      case "coach":
+        return "AI 教练舱";
+      case "stats":
+        return "数据与复盘";
+      case "settings":
+        return "系统设置";
+      default:
+        return "GrowthOS";
+    }
+  };
+
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-background-void text-text-primary">
-      {/* 侧边导航栏 (Sidebar) - 在沉浸式 Flow Space 下折叠隐藏 */}
+      {/* 移动端顶部状态栏 (Mobile Header) - 专注模式下隐藏 */}
       {!isFullScreenMode && (
-        <aside className="w-[240px] flex-shrink-0 bg-surface-1 flex flex-col border-r border-border-subtle">
+        <header className="fixed top-0 left-0 right-0 h-14 z-40 bg-surface-1/90 backdrop-blur-md border-b border-border-subtle flex items-center justify-between px-4 md:hidden">
+          <div className="flex items-center gap-2">
+            <div className="w-6 h-6 rounded-md bg-primary flex items-center justify-center">
+              <span className="text-black font-extrabold text-xs">G</span>
+            </div>
+            <span className="font-bold tracking-tight text-sm text-text-primary">
+              {getTabTitle(activeTab)}
+            </span>
+          </div>
+
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setCommandPaletteOpen(true)}
+              className="p-1.5 rounded-lg bg-surface-2 hover:bg-surface-3 border border-border-subtle text-text-secondary hover:text-text-primary transition-colors"
+              aria-label="命令面板"
+            >
+              <Command className="w-4 h-4" />
+            </button>
+            <button
+              onClick={toggleTheme}
+              className="p-1.5 rounded-lg bg-surface-2 hover:bg-surface-3 border border-border-subtle text-text-secondary hover:text-text-primary transition-colors"
+              aria-label="切换主题"
+            >
+              {theme === "dark" ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+            </button>
+          </div>
+        </header>
+      )}
+
+      {/* 侧边导航栏 (Sidebar) - 在沉浸式 Flow Space 下折叠隐藏，在移动端下隐藏 */}
+      {!isFullScreenMode && (
+        <aside className="w-[240px] flex-shrink-0 bg-surface-1 flex flex-col border-r border-border-subtle hidden md:flex">
           {/* Logo 区域 */}
           <div className="h-16 flex items-center px-6 border-b border-border-subtle gap-2">
             <div className="w-6 h-6 rounded-md bg-primary flex items-center justify-center">
@@ -273,8 +324,23 @@ export default function Home() {
       )}
 
       {/* 主视图区 (Main View) */}
-      <main className="flex-1 flex flex-col min-w-0 overflow-hidden relative bg-background-void">
-        {renderContentView()}
+      <main
+        className={`flex-1 flex flex-col min-w-0 overflow-hidden relative bg-background-void transition-all duration-200 ${
+          !isFullScreenMode ? "pt-14 pb-16 md:pt-0 md:pb-0" : ""
+        }`}
+      >
+        <AnimatePresence mode="wait">
+          <motion.div
+            key={activeTab}
+            initial={{ opacity: 0, x: 12 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: -12 }}
+            transition={{ duration: 0.2, ease: "easeInOut" }}
+            className="flex-1 flex flex-col min-w-0 overflow-hidden h-full"
+          >
+            {renderContentView()}
+          </motion.div>
+        </AnimatePresence>
       </main>
 
       {/* 全局命令面板 (Command Palette) */}
