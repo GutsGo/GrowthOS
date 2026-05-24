@@ -24,6 +24,7 @@ export interface Card {
   front: string; // 正面内容 (Markdown)
   back: string;  // 背面内容 (Markdown)
   tags: string[]; // 标签数组
+  linkedCards?: string[]; // 双向链接关联的卡片 ID 或标题名称列表
   reps: number;  // 连续成功复习次数
   interval: number; // 距离下一次复习的间隔天数
   ease: number;  // 简易度因子 (Ease Factor)，默认 2.5

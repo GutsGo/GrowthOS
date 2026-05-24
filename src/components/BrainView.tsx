@@ -3,6 +3,8 @@
 import React, { useState, useEffect, useRef, useMemo } from "react";
 import { db, Card } from "@/lib/db";
 import { useLiveQuery } from "dexie-react-hooks";
+import { useEditor, EditorContent } from "@tiptap/react";
+import StarterKit from "@tiptap/starter-kit";
 import {
   BookOpen,
   Plus,
@@ -40,6 +42,20 @@ export default function BrainView() {
   const [back, setBack] = useState("");
   const [tagsInput, setTagsInput] = useState("");
 
+  // 初始化 TipTap 编辑器（为卡片背面提供富文本支持）
+  const editor = useEditor({
+    extensions: [StarterKit],
+    content: "",
+    onUpdate: ({ editor }) => {
+      setBack(editor.getHTML());
+    },
+    editorProps: {
+      attributes: {
+        class: "w-full min-h-[160px] p-3 bg-surface-2 rounded-lg border border-border-subtle focus:border-primary focus:outline-none text-xs text-text-primary prose prose-invert max-w-none prose-sm overflow-y-auto",
+      },
+    },
+  });
+
   // 监听选中卡片变化，回填表单
   useEffect(() => {
     if (selectedCardId) {
@@ -53,8 +69,21 @@ export default function BrainView() {
       setFront("");
       setBack("");
       setTagsInput("");
+      if (editor) {
+        editor.commands.clearContent();
+      }
     }
-  }, [selectedCardId, cards]);
+  }, [selectedCardId, cards, editor]);
+
+  // 当 back 状态由外部变化时（回填表单），同步更新 TipTap 内容
+  useEffect(() => {
+    if (editor) {
+      const html = editor.getHTML();
+      if (html !== back) {
+        editor.commands.setContent(back || "");
+      }
+    }
+  }, [back, editor]);
 
   // 过滤卡片列表
   const filteredCards = useMemo(() => {
@@ -68,6 +97,20 @@ export default function BrainView() {
     );
   }, [cards, searchQuery]);
 
+  // 从 Markdown 或者是 HTML 富文本中提取双向引用的卡片正面标题
+  const extractLinkedCards = (text: string): string[] => {
+    // 匹配 [[被引用卡片的正面标题]]
+    const regex = /\[\[(.*?)\]\]/g;
+    const result: string[] = [];
+    let match;
+    while ((match = regex.exec(text)) !== null) {
+      if (match[1]) {
+        result.push(match[1].trim());
+      }
+    }
+    return Array.from(new Set(result));
+  };
+
   // 保存/修改卡片
   const handleSaveCard = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -79,6 +122,7 @@ export default function BrainView() {
       .filter((t) => t.length > 0);
 
     const isEdit = !!selectedCardId;
+    const linked = extractLinkedCards(front + " " + back);
 
     if (isEdit && selectedCardId) {
       const existing = cards.find((c) => c.id === selectedCardId);
@@ -88,6 +132,7 @@ export default function BrainView() {
           front,
           back,
           tags,
+          linkedCards: linked,
         });
       }
     } else {
@@ -96,6 +141,7 @@ export default function BrainView() {
         front,
         back,
         tags,
+        linkedCards: linked,
         reps: 0,
         interval: 0,
         ease: 2.5,
@@ -108,6 +154,9 @@ export default function BrainView() {
     setFront("");
     setBack("");
     setTagsInput("");
+    if (editor) {
+      editor.commands.clearContent();
+    }
   };
 
   // 删除卡片
@@ -129,7 +178,7 @@ export default function BrainView() {
   const width = 360;
   const height = 300;
 
-  // 1. 根据卡片和标签关系初始化力导向图的数据
+  // 1. 根据卡片、标签以及双向引用初始化力导向图的数据
   useEffect(() => {
     if (cards.length === 0) {
       setNodes([]);
@@ -144,8 +193,14 @@ export default function BrainView() {
     // 随机定位初始化
     const getRandPos = (max: number) => 40 + Math.random() * (max - 80);
 
+    // 1. 建立标题到 ID 的映射，便于渲染双向引用连线
+    const cardTitleToIdMap = new Map<string, string>();
+    cards.forEach((c) => {
+      cardTitleToIdMap.set(c.front.trim().toLowerCase(), c.id);
+    });
+
     cards.forEach((card) => {
-      // 加入卡片节点
+      // 2. 加入卡片节点
       tempNodes.push({
         id: card.id,
         label: card.front.substring(0, 8) + (card.front.length > 8 ? "..." : ""),
@@ -156,7 +211,20 @@ export default function BrainView() {
         vy: 0,
       });
 
-      // 提取并加入标签节点
+      // 3. 渲染双向引用 [[被引卡片正面标题]] 连线
+      if (card.linkedCards && card.linkedCards.length > 0) {
+        card.linkedCards.forEach((refTitle) => {
+          const targetId = cardTitleToIdMap.get(refTitle.toLowerCase());
+          if (targetId && targetId !== card.id) {
+            tempLinks.push({
+              source: card.id,
+              target: targetId,
+            });
+          }
+        });
+      }
+
+      // 4. 提取并加入标签节点并连线
       card.tags.forEach((tag) => {
         const tagId = `tag-${tag}`;
         if (!addedTags.has(tag)) {
@@ -378,16 +446,20 @@ export default function BrainView() {
 
           <div className="space-y-1.5">
             <label className="text-[10px] uppercase font-bold tracking-widest text-text-secondary font-mono">
-              背面 核心解答 (Back)
+              背面 核心解答 (Back - 支持 Markdown 与 [[双向链接]])
             </label>
-            <textarea
-              required
-              rows={6}
-              value={back}
-              onChange={(e) => setBack(e.target.value)}
-              placeholder="写下精炼的解答，可以使用口语化的方式以便复习时比对 (支持 Markdown)"
-              className="w-full px-3 py-2 bg-surface-2 rounded-lg border border-border-subtle focus:border-primary text-xs text-text-primary outline-none resize-none font-mono"
-            />
+            {editor ? (
+              <EditorContent editor={editor} />
+            ) : (
+              <textarea
+                required
+                rows={6}
+                value={back}
+                onChange={(e) => setBack(e.target.value)}
+                placeholder="编辑器加载中..."
+                className="w-full px-3 py-2 bg-surface-2 rounded-lg border border-border-subtle text-xs text-text-primary outline-none resize-none font-mono"
+              />
+            )}
           </div>
 
           <div className="space-y-1.5">
