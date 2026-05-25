@@ -14,18 +14,34 @@ export default function StatsView() {
   const dailyRecords = useLiveQuery(() => db.dailyRecords.toArray()) || [];
   const cards = useLiveQuery(() => db.cards.toArray()) || [];
 
+  // 挂载状态，防止服务端与客户端水合不一致
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
   // 能量波动折线图 Hover 状态
   const [hoveredPoint, setHoveredPoint] = useState<any | null>(null);
 
   // ==========================================
-  // 1. Streak 连续打卡自适应算法
+  // 1. Streak 连续打卡自适应算法（包含常规习惯打卡与已完成 AI 任务排程）
   // ==========================================
   const streakInfo = useMemo(() => {
-    if (habitLogs.length === 0) return { current: 0, max: 0 };
+    const datesSet = new Set<string>();
 
-    // 提取所有打卡的 YYYY-MM-DD，去重并从新到旧排序
-    const dates = Array.from(new Set(habitLogs.map((l) => l.date)))
-      .sort((a, b) => new Date(b).getTime() - new Date(a).getTime());
+    // 1. 收集常规与特化习惯打卡日期
+    habitLogs.forEach((l) => datesSet.add(l.date));
+
+    // 2. 收集有完成过至少一项 AI 排程任务的日期
+    dailyRecords.forEach((r) => {
+      if (r.aiTasks && r.aiTasks.some((t) => t.isCompleted)) {
+        datesSet.add(r.date);
+      }
+    });
+
+    const dates = Array.from(datesSet).sort(
+      (a, b) => new Date(b).getTime() - new Date(a).getTime()
+    );
 
     if (dates.length === 0) return { current: 0, max: 0 };
 
@@ -90,31 +106,31 @@ export default function StatsView() {
     if (tempMax > max) max = tempMax;
 
     return { current, max };
-  }, [habitLogs]);
+  }, [habitLogs, dailyRecords]);
 
   // ==========================================
   // 2. 6 大极客成就徽章锁定义与计算
   // ==========================================
   const badges = useMemo(() => {
     // 🌱 破土萌芽: 7 天 Streak
-    const isSprout = streakInfo.current >= 7;
+    const isSprout = mounted && streakInfo.current >= 7;
     // 🔥 烈火淬炼: 30 天 Streak
-    const isFlame = streakInfo.current >= 30;
+    const isFlame = mounted && streakInfo.current >= 30;
     // 👑 傲视群雄: 100 天 Streak
-    const isCrown = streakInfo.current >= 100;
+    const isCrown = mounted && streakInfo.current >= 100;
     
     // ⚡️ 能量掌控者: 能量滑块 10 或 1 且今日有打卡
-    const isEnergyMaster = dailyRecords.some(
+    const isEnergyMaster = mounted && dailyRecords.some(
       (r) => r.energyLevel === 10 || r.energyLevel === 1
     ) && habitLogs.length > 0;
     
     // 🧠 记忆大师: card reps 累积 >= 25
     const totalReps = cards.reduce((acc, c) => acc + (c.reps || 0), 0);
-    const isMemoryMaster = totalReps >= 25 && cards.length >= 4;
+    const isMemoryMaster = mounted && totalReps >= 25 && cards.length >= 4;
 
     // 🏆 社交博弈王: 社交打卡 >= 3 次
     const socialLogsCount = habitLogs.filter((l) => l.customData?.contact).length;
-    const isSocialKing = socialLogsCount >= 3;
+    const isSocialKing = mounted && socialLogsCount >= 3;
 
     return [
       {
@@ -172,7 +188,7 @@ export default function StatsView() {
         color: "from-pink-500/10 to-rose-500/10 border-pink-500/35 text-pink-400 shadow-[0_0_12px_rgba(236,72,153,0.15)]",
       },
     ];
-  }, [streakInfo, dailyRecords, cards, habitLogs]);
+  }, [streakInfo, dailyRecords, cards, habitLogs, mounted]);
 
   // 点击已解锁徽章触发彩屑爆破
   const handleBadgeClick = (unlocked: boolean) => {
@@ -258,12 +274,15 @@ export default function StatsView() {
   }, [energyTrendData]);
 
   // ==========================================
-  // 4. GitHub 风格 12 周打卡热力图计算
+  // 4. GitHub 风格年度打卡热力图计算 (12个月, 53周)
+  // ==========================================
+  // 4. GitHub 风格年度打卡热力图计算 (12个月, 53周)
   // ==========================================
   const heatmapData = useMemo(() => {
-    const totalDays = 84;
-    const data: { dateStr: string; count: number; dayOfWeek: number }[] = [];
+    const data: { dateStr: string; count: number; dayOfWeek: number; isFuture: boolean; isMonthStart: boolean; monthLabel: string }[] = [];
     const now = new Date();
+    // 归零今日时间的时分秒，仅保留年月日
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 
     const formatDate = (d: Date) => {
       const year = d.getFullYear();
@@ -272,24 +291,71 @@ export default function StatsView() {
       return `${year}-${month}-${date}`;
     };
 
-    const logsCountMap: Record<string, number> = {};
-    habitLogs.forEach((log) => {
-      logsCountMap[log.date] = (logsCountMap[log.date] || 0) + 1;
-    });
+    // 1. 找出本周日，并往前倒推 370 天（53周-1天）算出起始周一，保证今天必定包含在最后一列中
+    const day = today.getDay();
+    const daysToAdd = day === 0 ? 0 : 7 - day; // 如果今天是周日加0天，否则加到周日的天数
+    const endDate = new Date(today);
+    endDate.setDate(today.getDate() + daysToAdd);
 
-    for (let i = totalDays - 1; i >= 0; i--) {
-      const tempDate = new Date();
-      tempDate.setDate(now.getDate() - i);
-      const dateStr = formatDate(tempDate);
-      data.push({
-        dateStr,
-        count: logsCountMap[dateStr] || 0,
-        dayOfWeek: tempDate.getDay(),
+    const startDate = new Date(endDate);
+    startDate.setDate(endDate.getDate() - 370);
+
+    const logsCountMap: Record<string, number> = {};
+    if (mounted) {
+      // 1. 收集习惯打卡次数
+      habitLogs.forEach((log) => {
+        logsCountMap[log.date] = (logsCountMap[log.date] || 0) + 1;
+      });
+
+      // 2. 收集已完成的位置排程任务数量
+      dailyRecords.forEach((r) => {
+        if (r.aiTasks) {
+          const completedCount = r.aiTasks.filter((t) => t.isCompleted).length;
+          if (completedCount > 0) {
+            logsCountMap[r.date] = (logsCountMap[r.date] || 0) + completedCount;
+          }
+        }
       });
     }
 
+    // 2. 生成 53 周全量日期数据 (53 * 7 = 371 天)
+    const totalDays = 53 * 7;
+    const temp = new Date(startDate);
+    let lastMonth = -1;
+    for (let i = 0; i < totalDays; i++) {
+      const dateStr = formatDate(temp);
+      // 归零临时日期的时分秒进行严格日期比较，防止时分秒毫秒差异导致把今天错判为未来
+      const tempDayOnly = new Date(temp.getFullYear(), temp.getMonth(), temp.getDate());
+      const isFuture = tempDayOnly.getTime() > today.getTime();
+      
+      const dayOfWeek = temp.getDay() === 0 ? 7 : temp.getDay();
+      const currentMonth = temp.getMonth();
+      
+      let isMonthStart = false;
+      let monthLabel = "";
+      
+      // 在每周的第一天（周一）来确定是否展示跨月标签
+      if (dayOfWeek === 1 && currentMonth !== lastMonth) {
+        isMonthStart = true;
+        const monthNames = ["1月", "2月", "3月", "4月", "5月", "6月", "7月", "8月", "9月", "10月", "11月", "12月"];
+        monthLabel = monthNames[currentMonth];
+        lastMonth = currentMonth;
+      }
+      
+      data.push({
+        dateStr,
+        count: logsCountMap[dateStr] || 0,
+        dayOfWeek,
+        isFuture,
+        isMonthStart,
+        monthLabel,
+      });
+
+      temp.setDate(temp.getDate() + 1);
+    }
+
     return data;
-  }, [habitLogs]);
+  }, [habitLogs, dailyRecords, mounted]);
 
   // ==========================================
   // 5. 五维能力雷达图计算 (SVG 绘制)
@@ -303,6 +369,9 @@ export default function StatsView() {
   ];
 
   const radarScores = useMemo(() => {
+    if (!mounted) {
+      return { tech: 30, lang: 30, body: 30, social: 30, feynman: 30 };
+    }
     const techCount = habitLogs.filter((l) => l.habitId === "habit-1" || l.habitId.includes("code") || l.habitId.includes("guide-habit-flow")).length;
     const langCount = habitLogs.filter((l) => l.habitId === "habit-2" || l.habitId.includes("word") || l.habitId.includes("speak")).length;
     const bodyCount = habitLogs.filter((l) => l.habitId === "habit-3" || l.habitId.includes("fit") || l.habitId.includes("gym")).length;
@@ -318,7 +387,7 @@ export default function StatsView() {
       social: getScore(socialCount),
       feynman: getScore(feynmanCount),
     };
-  }, [habitLogs, cards]);
+  }, [habitLogs, cards, mounted]);
 
   const radarSvgPoints = useMemo(() => {
     const size = 300;
@@ -367,6 +436,7 @@ export default function StatsView() {
   }, [radarScores]);
 
   const highestTrait = useMemo(() => {
+    if (!mounted) return "数据加载中...";
     const keys: ("tech" | "lang" | "body" | "social" | "feynman")[] = ["tech", "lang", "body", "social", "feynman"];
     let maxKey = keys[0];
     keys.forEach((key) => {
@@ -383,7 +453,7 @@ export default function StatsView() {
       feynman: "深度传播者 (善于通过费曼法输出提炼核心知识)",
     };
     return traitNames[maxKey];
-  }, [radarScores]);
+  }, [radarScores, mounted]);
 
 
   return (
@@ -426,7 +496,7 @@ export default function StatsView() {
                 </span>
                 <div className="flex items-baseline gap-2 mt-1">
                   <span className="text-5xl md:text-6xl font-black font-mono tracking-tighter text-primary drop-shadow-[0_0_12px_rgba(29,185,84,0.3)]">
-                    {streakInfo.current}
+                    {mounted ? streakInfo.current : 0}
                   </span>
                   <span className="text-sm font-bold text-text-secondary">DAYS STREAK</span>
                 </div>
@@ -437,7 +507,7 @@ export default function StatsView() {
               <div className="flex justify-between items-center text-xs">
                 <span className="text-text-secondary font-medium">历史最高连击天数:</span>
                 <span className="font-bold font-mono text-text-primary text-sm flex items-center gap-1">
-                  🔥 {streakInfo.max} 天
+                  🔥 {mounted ? streakInfo.max : 0} 天
                 </span>
               </div>
               <p className="text-[10px] text-neutral-gray leading-relaxed bg-surface-3/50 p-2.5 rounded-lg border border-border-subtle/50 font-mono uppercase tracking-widest text-center">
@@ -499,15 +569,15 @@ export default function StatsView() {
         </section>
       </div>
 
-      {/* 3. 近期习惯活跃热力图 */}
+      {/* 3. 年度自律活跃热力图 */}
       <section className="bg-surface-1 border border-border-subtle p-5 rounded-2xl space-y-4">
         <div className="flex items-center justify-between">
           <h2 className="text-sm font-bold uppercase tracking-widest text-text-primary font-mono flex items-center gap-2">
-            <Flame className="w-4 h-4 text-primary" /> 近期习惯活跃热力图 (Last 12 Weeks)
+            <Flame className="w-4 h-4 text-primary" /> 年度自律活跃热力图 (Last 12 Months)
           </h2>
           <div className="flex items-center gap-1.5 text-[10px] text-text-secondary font-mono">
             <span>少</span>
-            <div className="w-2.5 h-2.5 rounded-sm bg-surface-3" />
+            <div className="w-2.5 h-2.5 rounded-sm bg-surface-3 border border-border-subtle/10" />
             <div className="w-2.5 h-2.5 rounded-sm bg-primary/30" />
             <div className="w-2.5 h-2.5 rounded-sm bg-primary/60" />
             <div className="w-2.5 h-2.5 rounded-sm bg-primary" />
@@ -517,25 +587,64 @@ export default function StatsView() {
 
         {/* 热力图网格 */}
         <div className="overflow-x-auto pb-2 select-none">
-          <div className="grid grid-flow-col auto-cols-max gap-1.5 justify-start">
-            {Array.from({ length: 12 }).map((_, colIdx) => (
-              <div key={colIdx} className="grid grid-rows-7 gap-1.5">
-                {heatmapData.slice(colIdx * 7, (colIdx + 1) * 7).map((item, rowIdx) => {
-                  let colorClass = "bg-surface-3";
-                  if (item.count === 1) colorClass = "bg-primary/30";
-                  if (item.count === 2) colorClass = "bg-primary/60";
-                  if (item.count >= 3) colorClass = "bg-primary shadow-[0_0_8px_rgba(29,185,84,0.3)]";
+          <div className="flex gap-3 items-end min-w-[1100px] py-2">
+            {/* 竖轴星期标签 (周一到周日) */}
+            <div className="grid grid-rows-7 gap-1.5 pr-1.5 text-[9px] text-text-secondary font-mono select-none">
+              <div className="h-3.5 flex items-center">周一</div>
+              <div className="h-3.5 flex items-center opacity-0">周二</div>
+              <div className="h-3.5 flex items-center">周三</div>
+              <div className="h-3.5 flex items-center opacity-0">周四</div>
+              <div className="h-3.5 flex items-center">周五</div>
+              <div className="h-3.5 flex items-center opacity-0">周六</div>
+              <div className="h-3.5 flex items-center">周日</div>
+            </div>
 
+            {/* 包含月份标签和打卡网格的右侧主容器 */}
+            <div className="flex-1 flex flex-col gap-1.5 relative">
+              {/* 月份横轴标签 */}
+              <div className="grid grid-flow-col auto-cols-max gap-1.5 justify-start h-4 mb-0.5 select-none">
+                {Array.from({ length: 53 }).map((_, colIdx) => {
+                  const dayItem = heatmapData[colIdx * 7];
                   return (
-                    <div
-                      key={rowIdx}
-                      title={`${item.dateStr}: 打卡 ${item.count} 次`}
-                      className={`w-3.5 h-3.5 rounded-[3px] transition-colors duration-150 ${colorClass}`}
-                    />
+                    <div key={colIdx} className="w-3.5 h-4 relative">
+                      {dayItem?.isMonthStart && (
+                        <span className="absolute left-0 top-0 whitespace-nowrap text-[9px] text-text-secondary font-mono leading-none">
+                          {dayItem.monthLabel}
+                        </span>
+                      )}
+                    </div>
                   );
                 })}
               </div>
-            ))}
+
+              {/* 53周打卡网格 */}
+              <div className="grid grid-flow-col auto-cols-max gap-1.5 justify-start">
+                {Array.from({ length: 53 }).map((_, colIdx) => (
+                  <div key={colIdx} className="grid grid-rows-7 gap-1.5">
+                    {heatmapData.slice(colIdx * 7, (colIdx + 1) * 7).map((item, rowIdx) => {
+                      let colorClass = "bg-surface-3 border border-border-subtle/10";
+                      if (item.isFuture) {
+                        colorClass = "bg-transparent opacity-0 pointer-events-none";
+                      } else if (item.count === 1) {
+                        colorClass = "bg-primary/30";
+                      } else if (item.count === 2) {
+                        colorClass = "bg-primary/60";
+                      } else if (item.count >= 3) {
+                        colorClass = "bg-primary shadow-[0_0_8px_rgba(29,185,84,0.3)]";
+                      }
+
+                      return (
+                        <div
+                          key={rowIdx}
+                          title={item.isFuture ? undefined : `${item.dateStr}: 打卡 ${item.count} 次`}
+                          className={`w-3.5 h-3.5 rounded-[3px] transition-colors duration-150 ${colorClass}`}
+                        />
+                      );
+                    })}
+                  </div>
+                ))}
+              </div>
+            </div>
           </div>
         </div>
       </section>
