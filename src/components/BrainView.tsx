@@ -1,10 +1,13 @@
 "use client";
 
 import React, { useState, useEffect, useRef, useMemo } from "react";
-import { db, Card } from "@/lib/db";
+import { db, Card, trackDeletion } from "@/lib/db";
 import { useLiveQuery } from "dexie-react-hooks";
-import { useEditor, EditorContent } from "@tiptap/react";
+import { useEditor, EditorContent, Extension } from "@tiptap/react";
+import { useAppStore } from "@/lib/store";
 import StarterKit from "@tiptap/starter-kit";
+import { Plugin, PluginKey } from "@tiptap/pm/state";
+import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   BookOpen,
@@ -16,6 +19,115 @@ import {
   Link as LinkIcon,
   HelpCircle,
 } from "lucide-react";
+import {
+  ReactFlow,
+  Background,
+  Controls,
+  Handle,
+  Position,
+  useNodesState,
+  useEdgesState,
+  type Node,
+  type Edge,
+} from "@xyflow/react";
+import "@xyflow/react/dist/style.css";
+
+// 1. TipTap 双向链接语法高亮 Decoration 插件
+const BiLinkHighlight = Extension.create({
+  name: "biLinkHighlight",
+  addProseMirrorPlugins() {
+    return [
+      new Plugin({
+        key: new PluginKey("biLinkHighlight"),
+        state: {
+          init(_, { doc }) {
+            return findBiLinks(doc);
+          },
+          apply(tr, oldState) {
+            return tr.docChanged ? findBiLinks(tr.doc) : oldState;
+          },
+        },
+        props: {
+          decorations(state) {
+            return this.getState(state);
+          },
+        },
+      }),
+    ];
+  },
+});
+
+function findBiLinks(doc: any) {
+  const decorations: any[] = [];
+  doc.descendants((node: any, pos: number) => {
+    if (node.isText) {
+      const text = node.text || "";
+      const regex = /\[\[(.*?)\]\]/g;
+      let match;
+      while ((match = regex.exec(text)) !== null) {
+        const start = pos + match.index;
+        const end = start + match[0].length;
+        decorations.push(
+          Decoration.inline(start, end, {
+            class: "bg-primary/20 text-primary border border-primary/30 rounded px-1 font-mono font-semibold mx-0.5 shadow-sm",
+          })
+        );
+      }
+    }
+  });
+  return DecorationSet.create(doc, decorations);
+}
+
+// 2. React Flow 自定义节点组件
+const CardNodeComponent = ({ data }: any) => {
+  return (
+    <div className="relative">
+      <Handle
+        type="target"
+        position={Position.Bottom}
+        id="card-target"
+        style={{ position: "absolute", top: "50%", left: "50%", transform: "translate(-50%, -50%)", opacity: 0 }}
+      />
+      <Handle
+        type="source"
+        position={Position.Top}
+        id="card-source"
+        style={{ position: "absolute", top: "50%", left: "50%", transform: "translate(-50%, -50%)", opacity: 0 }}
+      />
+      <div
+        className={`px-3 py-1.5 rounded-xl border text-[10px] font-sans font-medium tracking-tight shadow-md select-none transition-all duration-200 relative z-10 ${
+          data.isSelected
+            ? "bg-surface-1 text-primary border-primary shadow-[0_0_12px_rgba(29,185,84,0.3)] scale-[1.03]"
+            : "bg-surface-1 border-border-subtle text-text-primary hover:border-text-secondary"
+        }`}
+        style={{ maxWidth: 120 }}
+      >
+        <div className="truncate font-semibold text-center">{data.label}</div>
+      </div>
+    </div>
+  );
+};
+
+const TagNodeComponent = ({ data }: any) => {
+  return (
+    <div className="relative">
+      <Handle
+        type="target"
+        position={Position.Bottom}
+        id="tag-target"
+        style={{ position: "absolute", top: "50%", left: "50%", transform: "translate(-50%, -50%)", opacity: 0 }}
+      />
+      <div className="px-2 py-1 rounded-lg border border-ai-blue bg-surface-1 text-[9px] text-ai-blue font-semibold font-mono tracking-tight shadow-sm select-none relative z-10">
+        #{data.label.replace(/^#/, "")}
+      </div>
+    </div>
+  );
+};
+
+const nodeTypes = {
+  cardNode: CardNodeComponent,
+  tagNode: TagNodeComponent,
+};
 
 interface GraphNode {
   id: string;
@@ -34,6 +146,7 @@ interface GraphLink {
 
 export default function BrainView() {
   const cards = useLiveQuery(() => db.cards.toArray()) || [];
+  const theme = useAppStore((state) => state.theme);
 
   const [selectedCardId, setSelectedCardId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
@@ -53,22 +166,125 @@ export default function BrainView() {
     type: "success",
   });
 
+  // 键盘关联面板的搜索状态
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [suggestionQuery, setSuggestionQuery] = useState("");
+  const [suggestionIndex, setSuggestionIndex] = useState(0);
+
+  // 解决 TipTap 键盘事件回调闭包缓存问题的 Refs
+  const showSuggestionsRef = useRef(false);
+  const suggestionIndexRef = useRef(0);
+  const filteredSuggestionsRef = useRef<string[]>([]);
+
+  useEffect(() => {
+    showSuggestionsRef.current = showSuggestions;
+  }, [showSuggestions]);
+
+  useEffect(() => {
+    suggestionIndexRef.current = suggestionIndex;
+  }, [suggestionIndex]);
+
+  // 双链匹配卡片列表
+  const suggestions = useMemo(() => {
+    return cards
+      .filter((c) => c.id !== selectedCardId)
+      .map((c) => c.front.trim());
+  }, [cards, selectedCardId]);
+
+  const filteredSuggestions = useMemo(() => {
+    const query = suggestionQuery.toLowerCase().trim();
+    if (!query) return suggestions.slice(0, 5);
+    return suggestions
+      .filter((title) => title.toLowerCase().includes(query))
+      .slice(0, 5);
+  }, [suggestions, suggestionQuery]);
+
+  useEffect(() => {
+    filteredSuggestionsRef.current = filteredSuggestions;
+  }, [filteredSuggestions]);
+
+  // 处理双链输入匹配检测
+  const checkSuggestions = (editorInstance: any) => {
+    const { from } = editorInstance.state.selection;
+    const textBefore = editorInstance.state.doc.textBetween(Math.max(0, from - 20), from, " ");
+    const match = /\[\[([^\]]*)$/.exec(textBefore);
+    if (match) {
+      setShowSuggestions(true);
+      setSuggestionQuery(match[1]);
+      setSuggestionIndex(0);
+    } else {
+      setShowSuggestions(false);
+    }
+  };
+
+  // 插入关联卡片
+  const selectSuggestion = (title: string) => {
+    if (!editor) return;
+    const { from } = editor.state.selection;
+    const textBefore = editor.state.doc.textBetween(Math.max(0, from - 20), from, " ");
+    const match = /\[\[([^\]]*)$/.exec(textBefore);
+    if (match) {
+      const matchLength = match[0].length;
+      const startPos = from - matchLength;
+      
+      editor
+        .chain()
+        .focus()
+        .insertContentAt({ from: startPos, to: from }, `[[${title}]]`)
+        .run();
+    }
+    setShowSuggestions(false);
+  };
+
+  // 处理 TipTap 按键劫持
+  const onSuggestionKeyDown = (key: string) => {
+    const list = filteredSuggestionsRef.current;
+    if (list.length === 0) {
+      if (key === "Escape") setShowSuggestions(false);
+      return;
+    }
+    if (key === "ArrowDown") {
+      setSuggestionIndex((prev) => (prev + 1) % list.length);
+    } else if (key === "ArrowUp") {
+      setSuggestionIndex((prev) => (prev - 1 + list.length) % list.length);
+    } else if (key === "Enter") {
+      const selectedTitle = list[suggestionIndexRef.current];
+      if (selectedTitle) {
+        selectSuggestion(selectedTitle);
+      }
+    } else if (key === "Escape") {
+      setShowSuggestions(false);
+    }
+  };
+
   // 初始化 TipTap 编辑器（为卡片背面提供富文本支持）
   const editor = useEditor({
-    extensions: [StarterKit],
+    extensions: [StarterKit, BiLinkHighlight],
     content: "",
     immediatelyRender: false,
     onUpdate: ({ editor }) => {
       setBack(editor.getHTML());
+      checkSuggestions(editor);
     },
     onSelectionUpdate: ({ editor }) => {
       const { from, to } = editor.state.selection;
       const text = editor.state.doc.textBetween(from, to, " ");
       setSelectedText(text.trim());
+      checkSuggestions(editor);
     },
     editorProps: {
       attributes: {
         class: "w-full min-h-[160px] p-3 bg-surface-2 rounded-lg border border-border-subtle focus:border-primary focus:outline-none text-xs text-text-primary prose prose-invert max-w-none prose-sm overflow-y-auto",
+      },
+      handleKeyDown: (view, event) => {
+        if (showSuggestionsRef.current) {
+          if (["ArrowDown", "ArrowUp", "Enter", "Escape"].includes(event.key)) {
+            event.preventDefault();
+            onSuggestionKeyDown(event.key);
+            return true;
+          }
+        }
+        return false;
       },
     },
   });
@@ -241,6 +457,7 @@ export default function BrainView() {
   const handleDeleteCard = async (id: string) => {
     if (confirm("确定要删除这张记忆卡片吗？此操作不可撤销。")) {
       await db.cards.delete(id);
+      await trackDeletion("cards", id);
       if (selectedCardId === id) {
         setSelectedCardId(null);
       }
@@ -248,19 +465,18 @@ export default function BrainView() {
   };
 
   // ==========================================
-  // SVG 局部知识图谱力导向图物理引擎
+  // React Flow & Verlet 物理动力学拓扑引擎
   // ==========================================
-  const svgRef = useRef<SVGSVGElement>(null);
-  const [nodes, setNodes] = useState<GraphNode[]>([]);
-  const [links, setLinks] = useState<GraphLink[]>([]);
-  const width = 360;
-  const height = 300;
+  const [rfNodes, setRfNodes, onNodesChange] = useNodesState<Node>([]);
+  const [rfEdges, setRfEdges, onEdgesChange] = useEdgesState<Edge>([]);
+  const width = 500;
+  const height = 400;
 
-  // 1. 根据卡片、标签以及双向引用初始化力导向图的数据
+  // 1. 同步进行力导向图物理碰撞运算，瞬间计算出完美的平衡位置，避免高频 tick 冲突和拖拽闪烁
   useEffect(() => {
     if (cards.length === 0) {
-      setNodes([]);
-      setLinks([]);
+      setRfNodes([]);
+      setRfEdges([]);
       return;
     }
 
@@ -268,17 +484,14 @@ export default function BrainView() {
     const tempLinks: GraphLink[] = [];
     const addedTags = new Set<string>();
 
-    // 随机定位初始化
     const getRandPos = (max: number) => 40 + Math.random() * (max - 80);
 
-    // 1. 建立标题到 ID 的映射，便于渲染双向引用连线
     const cardTitleToIdMap = new Map<string, string>();
     cards.forEach((c) => {
       cardTitleToIdMap.set(c.front.trim().toLowerCase(), c.id);
     });
 
     cards.forEach((card) => {
-      // 2. 加入卡片节点
       tempNodes.push({
         id: card.id,
         label: card.front.substring(0, 8) + (card.front.length > 8 ? "..." : ""),
@@ -289,7 +502,6 @@ export default function BrainView() {
         vy: 0,
       });
 
-      // 3. 渲染双向引用 [[被引卡片正面标题]] 连线
       if (card.linkedCards && card.linkedCards.length > 0) {
         card.linkedCards.forEach((refTitle) => {
           const targetId = cardTitleToIdMap.get(refTitle.toLowerCase());
@@ -302,14 +514,13 @@ export default function BrainView() {
         });
       }
 
-      // 4. 提取并加入标签节点并连线
       card.tags.forEach((tag) => {
         const tagId = `tag-${tag}`;
         if (!addedTags.has(tag)) {
           addedTags.add(tag);
           tempNodes.push({
             id: tagId,
-            label: `#${tag}`,
+            label: tag,
             type: "tag",
             x: getRandPos(width),
             y: getRandPos(height),
@@ -317,7 +528,6 @@ export default function BrainView() {
             vy: 0,
           });
         }
-        // 建立连接
         tempLinks.push({
           source: card.id,
           target: tagId,
@@ -325,94 +535,144 @@ export default function BrainView() {
       });
     });
 
-    setNodes(tempNodes);
-    setLinks(tempLinks);
-  }, [cards]);
+    // ==================================================
+    // 同步物理引擎计算（跑 120 帧，约 2 秒钟的模拟，使其静止就位）
+    // ==================================================
+    const simulationNodes = [...tempNodes];
+    const centerX = width / 2;
+    const centerY = height / 2;
 
-  // 2. 动画帧更新，使用极简 Verlet/Euler 物理引擎模拟引力和斥力
-  useEffect(() => {
-    if (nodes.length === 0) return;
-
-    let animId: number;
-
-    const tick = () => {
-      setNodes((prevNodes) => {
-        const nextNodes = prevNodes.map((n) => ({ ...n }));
-
-        // 1. 向中心聚拢的重力
-        const centerX = width / 2;
-        const centerY = height / 2;
-        nextNodes.forEach((n) => {
-          n.vx += (centerX - n.x) * 0.003;
-          n.vy += (centerY - n.y) * 0.003;
-        });
-
-        // 2. 节点间的排斥力 (防止重叠)
-        for (let i = 0; i < nextNodes.length; i++) {
-          for (let j = i + 1; j < nextNodes.length; j++) {
-            const n1 = nextNodes[i];
-            const n2 = nextNodes[j];
-            const dx = n2.x - n1.x;
-            const dy = n2.y - n1.y;
-            const dist = Math.hypot(dx, dy) || 1;
-            
-            // 节点排斥半径
-            const r = n1.type === "tag" && n2.type === "tag" ? 90 : 70;
-            if (dist < r) {
-              const force = (r - dist) * 0.04;
-              const fx = (dx / dist) * force;
-              const fy = (dy / dist) * force;
-              n1.vx -= fx;
-              n1.vy -= fy;
-              n2.vx += fx;
-              n2.vy += fy;
-            }
-          }
-        }
-
-        // 3. 连线弹性拉力
-        links.forEach((link) => {
-          const sNode = nextNodes.find((n) => n.id === link.source);
-          const tNode = nextNodes.find((n) => n.id === link.target);
-          if (sNode && tNode) {
-            const dx = tNode.x - sNode.x;
-            const dy = tNode.y - sNode.y;
-            const dist = Math.hypot(dx, dy) || 1;
-            const targetDist = 60; // 弹簧理想长度
-            const springForce = (dist - targetDist) * 0.008;
-            const fx = (dx / dist) * springForce;
-            const fy = (dy / dist) * springForce;
-            
-            sNode.vx += fx;
-            sNode.vy += fy;
-            tNode.vx -= fx;
-            tNode.vy -= fy;
-          }
-        });
-
-        // 4. 应用速度与边界摩擦
-        nextNodes.forEach((n) => {
-          n.x += n.vx;
-          n.y += n.vy;
-          
-          // 摩擦系数
-          n.vx *= 0.82;
-          n.vy *= 0.82;
-
-          // 限制在画布边界内
-          n.x = Math.max(20, Math.min(width - 20, n.x));
-          n.y = Math.max(20, Math.min(height - 20, n.y));
-        });
-
-        return nextNodes;
+    for (let step = 0; step < 120; step++) {
+      // 1. 重力聚拢
+      simulationNodes.forEach((n) => {
+        n.vx += (centerX - n.x) * 0.003;
+        n.vy += (centerY - n.y) * 0.003;
       });
 
-      animId = requestAnimationFrame(tick);
-    };
+      // 2. 斥力防止重叠
+      for (let i = 0; i < simulationNodes.length; i++) {
+        for (let j = i + 1; j < simulationNodes.length; j++) {
+          const n1 = simulationNodes[i];
+          const n2 = simulationNodes[j];
+          const dx = n2.x - n1.x;
+          const dy = n2.y - n1.y;
+          const dist = Math.hypot(dx, dy) || 1;
+          const r = n1.type === "tag" && n2.type === "tag" ? 110 : 90;
+          if (dist < r) {
+            const force = (r - dist) * 0.04;
+            const fx = (dx / dist) * force;
+            const fy = (dy / dist) * force;
+            n1.vx -= fx;
+            n1.vy -= fy;
+            n2.vx += fx;
+            n2.vy += fy;
+          }
+        }
+      }
 
-    animId = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(animId);
-  }, [links, nodes.length]);
+      // 3. 连线弹性拉力
+      tempLinks.forEach((link) => {
+        const sNode = simulationNodes.find((n) => n.id === link.source);
+        const tNode = simulationNodes.find((n) => n.id === link.target);
+        if (sNode && tNode) {
+          const dx = tNode.x - sNode.x;
+          const dy = tNode.y - sNode.y;
+          const dist = Math.hypot(dx, dy) || 1;
+          const targetDist = 75;
+          const springForce = (dist - targetDist) * 0.008;
+          const fx = (dx / dist) * springForce;
+          const fy = (dy / dist) * springForce;
+          sNode.vx += fx;
+          sNode.vy += fy;
+          tNode.vx -= fx;
+          tNode.vy -= fy;
+        }
+      });
+
+      // 4. 应用速度与限制
+      simulationNodes.forEach((n) => {
+        n.x += n.vx;
+        n.y += n.vy;
+        n.vx *= 0.82;
+        n.vy *= 0.82;
+        n.x = Math.max(40, Math.min(width - 40, n.x));
+        n.y = Math.max(40, Math.min(height - 40, n.y));
+      });
+    }
+
+    // 2. 将最终稳定的物理坐标一次性塞给 React Flow，之后拖拽完全由 React Flow 接管，避免闪烁
+    const calculatedRfNodes = simulationNodes.map((n) => ({
+      id: n.id,
+      type: n.type === "card" ? "cardNode" : "tagNode",
+      position: { x: n.x, y: n.y },
+      data: {
+        label: n.label,
+        id: n.id,
+        isSelected: n.id === selectedCardId,
+      },
+    }));
+
+    const calculatedRfEdges = tempLinks.map((link, idx) => {
+      const isHighlighted =
+        selectedCardId &&
+        (link.source === selectedCardId || link.target === selectedCardId);
+      const defaultLineColor = theme === "dark" ? "#4d4d4d" : "#c8c8cb";
+      const isTargetTag = link.target.startsWith("tag-");
+      return {
+        id: `e-${idx}`,
+        source: link.source,
+        target: link.target,
+        sourceHandle: "card-source",
+        targetHandle: isTargetTag ? "tag-target" : "card-target",
+        type: "straight",
+        style: {
+          stroke: isHighlighted ? "#1DB954" : defaultLineColor,
+          strokeWidth: isHighlighted ? 2 : 1.2,
+          opacity: isHighlighted ? 1.0 : 0.8,
+        },
+      };
+    });
+
+    setRfNodes(calculatedRfNodes);
+    setRfEdges(calculatedRfEdges);
+  }, [cards]);
+
+  // 3. 动态控制高亮选中卡片的连线和节点高亮状态，保留用户拖动后的新位置而不会闪烁弹回
+  useEffect(() => {
+    setRfNodes((prevNodes) =>
+      prevNodes.map((n) => ({
+        ...n,
+        data: {
+          ...n.data,
+          isSelected: n.id === selectedCardId,
+        },
+      }))
+    );
+
+    setRfEdges((prevEdges) =>
+      prevEdges.map((edge) => {
+        const isHighlighted =
+          selectedCardId &&
+          (edge.source === selectedCardId || edge.target === selectedCardId);
+        const defaultLineColor = theme === "dark" ? "#4d4d4d" : "#c8c8cb";
+        return {
+          ...edge,
+          style: {
+            ...edge.style,
+            stroke: isHighlighted ? "#1DB954" : defaultLineColor,
+            strokeWidth: isHighlighted ? 2 : 1.2,
+            opacity: isHighlighted ? 1.0 : 0.8,
+          },
+        };
+      })
+    );
+  }, [selectedCardId, theme, setRfNodes, setRfEdges]);
+
+  const handleReactFlowInit = (instance: any) => {
+    setTimeout(() => {
+      instance.fitView({ padding: 0.25 });
+    }, 100);
+  };
 
   return (
     <div className="flex-1 flex flex-col md:flex-row overflow-hidden">
@@ -559,8 +819,34 @@ export default function BrainView() {
               背面 核心解答 (Back - 支持 Markdown 与 [[双向链接]])
             </label>
             {editor ? (
-              <>
+              <div className="relative">
                 <EditorContent editor={editor} />
+                
+                {/* 悬浮卡片推荐面板 */}
+                {showSuggestions && filteredSuggestions.length > 0 && (
+                  <div className="absolute left-3 top-[calc(100%-8px)] z-50 w-64 bg-surface-3 border border-border-subtle rounded-xl p-1.5 shadow-2xl flex flex-col gap-0.5">
+                    <span className="text-[9px] text-text-secondary uppercase font-mono tracking-widest px-2 py-1 font-bold">
+                      💡 关联已有卡片
+                    </span>
+                    {filteredSuggestions.map((title, idx) => {
+                      const isFocused = idx === suggestionIndex;
+                      return (
+                        <div
+                          key={title}
+                          onClick={() => selectSuggestion(title)}
+                          className={`px-2.5 py-1.5 rounded-lg text-xs cursor-pointer select-none transition-colors truncate font-medium ${
+                            isFocused
+                              ? "bg-primary text-black font-semibold"
+                              : "text-text-primary hover:bg-surface-2"
+                          }`}
+                        >
+                          [[{title}]]
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
                 {/* AI 提取闪卡工具栏 */}
                 <div className="mt-2 p-3 bg-surface-2/40 border border-border-subtle/60 rounded-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
                   <div className="flex-1">
@@ -597,7 +883,7 @@ export default function BrainView() {
                     )}
                   </button>
                 </div>
-              </>
+              </div>
             ) : (
               <textarea
                 required
@@ -664,103 +950,37 @@ export default function BrainView() {
           </p>
         </div>
 
-        <div className="flex-1 flex items-center justify-center bg-surface-1/10 relative p-4">
-          {nodes.length === 0 ? (
-            <div className="text-[11px] text-neutral-gray flex flex-col items-center gap-1">
+        <div className="w-full h-[400px] md:h-full relative bg-surface-1/5 border border-border-subtle/50 rounded-2xl overflow-hidden">
+          {rfNodes.length === 0 ? (
+            <div className="absolute inset-0 flex flex-col items-center justify-center text-[11px] text-neutral-gray gap-1">
               <HelpCircle className="w-6 h-6 stroke-[1.5]" />
               <span>暂无网络拓扑数据</span>
             </div>
           ) : (
-            <svg
-              ref={svgRef}
-              viewBox={`0 0 ${width} ${height}`}
-              className="w-full max-w-[360px] h-auto overflow-visible select-none"
+            <ReactFlow
+              nodes={rfNodes}
+              edges={rfEdges}
+              nodeTypes={nodeTypes}
+              onNodesChange={onNodesChange}
+              onEdgesChange={onEdgesChange}
+              onNodeClick={(e, node) => {
+                if (node.type === "cardNode") {
+                  setSelectedCardId(node.id);
+                  setBrainSubTab("editor");
+                }
+              }}
+              onInit={handleReactFlowInit}
+              minZoom={0.1}
+              maxZoom={3}
             >
-              {/* 渲染连接边 */}
-              {links.map((link, idx) => {
-                const sNode = nodes.find((n) => n.id === link.source);
-                const tNode = nodes.find((n) => n.id === link.target);
-                if (!sNode || !tNode) return null;
-                
-                const isHighlighted = sNode.id === selectedCardId || tNode.id === selectedCardId;
-                
-                return (
-                  <line
-                     key={idx}
-                     x1={sNode.x}
-                     y1={sNode.y}
-                     x2={tNode.x}
-                     y2={tNode.y}
-                     stroke={isHighlighted ? "#1DB954" : "#282828"}
-                     strokeWidth={isHighlighted ? 1.5 : 1}
-                     strokeOpacity={isHighlighted ? 0.9 : 0.4}
-                  />
-                );
-              })}
-
-              {/* 渲染节点 */}
-              {nodes.map((node) => {
-                const isSelected = node.id === selectedCardId;
-                const isLinkedToSelected = links.some(
-                  (l) =>
-                    (l.source === node.id && l.target === selectedCardId) ||
-                    (l.target === node.id && l.source === selectedCardId)
-                );
-
-                const isHighlight = isSelected || isLinkedToSelected;
-
-                return (
-                  <g
-                    key={node.id}
-                    className="cursor-pointer"
-                    onClick={() => {
-                      if (node.type === "card") {
-                        setSelectedCardId(node.id);
-                        setBrainSubTab("editor"); // 图谱内点击卡片自动切换到编辑页
-                      }
-                    }}
-                  >
-                    {node.type === "card" ? (
-                      // 卡片节点渲染成精细圆圈
-                      <circle
-                        cx={node.x}
-                        cy={node.y}
-                        r={isSelected ? 10 : 8}
-                        fill={isHighlight ? "#1DB954" : "#282828"}
-                        stroke={isHighlight ? "#1ED760" : "#535353"}
-                        strokeWidth={1.5}
-                      />
-                    ) : (
-                      // 标签节点渲染成微型透明胶囊
-                      <rect
-                        x={node.x - 22}
-                        y={node.y - 8}
-                        width={44}
-                        height={16}
-                        rx={4}
-                        fill="#181818"
-                        stroke={isHighlight ? "#3b82f6" : "#282828"}
-                        strokeWidth={1}
-                      />
-                    )}
-                    
-                    {/* 文字标签 */}
-                    <text
-                      x={node.x}
-                      y={node.y + (node.type === "card" ? 18 : 3)}
-                      textAnchor="middle"
-                      className={`text-[9px] font-sans font-medium transition-colors select-none ${
-                        isHighlight
-                          ? "fill-primary font-bold"
-                          : "fill-neutral-gray"
-                      }`}
-                    >
-                      {node.label}
-                    </text>
-                  </g>
-                );
-              })}
-            </svg>
+              <Background
+                color={theme === "dark" ? "#535353" : "#D4D4D8"}
+                gap={16}
+                size={1}
+                className="opacity-20"
+              />
+              <Controls />
+            </ReactFlow>
           )}
         </div>
       </div>
