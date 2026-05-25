@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "@xyflow/react/dist/style.css";
 
 :root {
   --color-primary: #16a34a; /* 亮色下选用更深且健康的森林绿以保证阅读对比度 */
@@ -113,4 +114,46 @@ input[type="button"] {
 
 .animate-pulse-slow {
   animation: borderPulse 2.5s infinite ease-in-out;
+}
+
+/* React Flow 暗色与亮色主题定制适配 */
+.react-flow__controls {
+  background: var(--color-surface-3) !important;
+  border: 1px solid var(--color-border-subtle) !important;
+  border-radius: 8px !important;
+  box-shadow: var(--shadow-level-3) !important;
+  overflow: hidden !important;
+}
+
+.react-flow__controls-button {
+  background: var(--color-surface-3) !important;
+  color: var(--color-text-primary) !important;
+  border: none !important;
+  border-bottom: 1px solid var(--color-border-subtle) !important;
+  fill: currentColor !important;
+  transition: background-color 0.2s ease !important;
+}
+
+.react-flow__controls-button:last-child {
+  border-bottom: none !important;
+}
+
+.react-flow__controls-button:hover {
+  background: var(--color-surface-2) !important;
+}
+
+.react-flow__controls-button svg {
+  fill: currentColor !important;
+}
+
+.react-flow__attribution {
+  display: none !important; /* 隐藏右下角 React Flow 官方水印，保持画面极简 */
+}
+
+/* 清除 React Flow 默认节点包裹框的白底、硬边框与阴影，使自定义节点自适应呈现 */
+.react-flow__node {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  padding: 0 !important;
 }
