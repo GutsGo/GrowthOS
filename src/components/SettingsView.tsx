@@ -1,7 +1,9 @@
 "use client";
 
 import React, { useState } from "react";
-import { db, Habit } from "@/lib/db";
+import { db, Habit, trackDeletion } from "@/lib/db";
+import { supabase } from "@/lib/supabase";
+import confetti from "canvas-confetti";
 import { useLiveQuery } from "dexie-react-hooks";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -31,6 +33,8 @@ export default function SettingsView() {
   const [name, setName] = useState("");
   const [icon, setIcon] = useState("Code");
   const [energyDemand, setEnergyDemand] = useState<"high" | "medium" | "low">("medium");
+  const [dependsOn, setDependsOn] = useState("");
+  const [customFormType, setCustomFormType] = useState<"none" | "fitness" | "social">("none");
 
   // 云端同步与登录控制台状态
   const [email, setEmail] = useState("");
@@ -83,37 +87,495 @@ export default function SettingsView() {
       setTimeout(() => setToast((prev) => ({ ...prev, show: false })), 3000);
       return;
     }
+    handleStartSync();
+  };
+
+  // 开始双向同步
+  const handleStartSync = async () => {
+    if (!isLoggedIn) {
+      setToast({
+        show: true,
+        msg: `🔒 授权失败：请先输入邮箱并发送魔法链接登录后再同步。`,
+        type: "error",
+      });
+      setTimeout(() => setToast((prev) => ({ ...prev, show: false })), 3000);
+      return;
+    }
+
+    if (!supabase) {
+      setToast({
+        show: true,
+        msg: `🔒 同步失败：请先在根目录配置 NEXT_PUBLIC_SUPABASE_URL 与 NEXT_PUBLIC_SUPABASE_ANON_KEY 环境变量，或检查云端数据库状态。`,
+        type: "error",
+      });
+      setTimeout(() => setToast((prev) => ({ ...prev, show: false })), 4000);
+      return;
+    }
 
     setIsSyncing(true);
-    const steps = [
-      "正在建立与 Supabase PostgreSQL 数据库连接...",
-      "比对 IndexedDB 本地数据与云端 Schema 结构...",
-      "双向合并本地卡片及打卡记录...",
-      "上传成功！同步成果已记录归档。",
-    ];
+    
+    try {
+      // 步骤 1：同步原子习惯 (habits)
+      setSyncStatusText("正在比对本地与云端原子习惯 (habits)...");
+      const localHabits = await db.habits.toArray();
+      const habitsDelLog = await db.deletedRecords.where("tableName").equals("habits").toArray();
+      const habitsDelIds = new Set(habitsDelLog.map(d => d.id));
+      
+      const { data: cloudHabits, error: errHabits } = await supabase.from("supabase_habits").select("*");
+      if (errHabits) throw errHabits;
+      
+      const cloudHabitsMap = new Map(cloudHabits?.map(c => [c.id, c]) || []);
+      const localHabitsMap = new Map(localHabits.map(h => [h.id, h]));
+      
+      const habitsToCloud: any[] = [];
+      const habitsToLocal: any[] = [];
+      const habitsDeleteInCloud: string[] = [];
 
-    let currentStep = 0;
-    setSyncStatusText(steps[0]);
+      localHabits.forEach(local => {
+        const cloud = cloudHabitsMap.get(local.id);
+        const localTime = new Date(local.updatedAt || local.createdAt).getTime();
+        if (!cloud) {
+          habitsToCloud.push({
+            id: local.id,
+            name: local.name,
+            icon: local.icon,
+            frequency: local.frequency,
+            energy_demand: local.energyDemand,
+            order: local.order || 0,
+            depends_on: local.dependsOn || null,
+            custom_form_type: local.customFormType || "none",
+            updated_at: local.updatedAt || local.createdAt || new Date()
+          });
+        } else {
+          const cloudTime = new Date(cloud.updated_at).getTime();
+          if (localTime > cloudTime) {
+            habitsToCloud.push({
+              id: local.id,
+              name: local.name,
+              icon: local.icon,
+              frequency: local.frequency,
+              energy_demand: local.energyDemand,
+              order: local.order || 0,
+              depends_on: local.dependsOn || null,
+              custom_form_type: local.customFormType || "none",
+              updated_at: local.updatedAt || local.createdAt || new Date()
+            });
+          } else if (cloudTime > localTime) {
+            habitsToLocal.push({
+              id: cloud.id,
+              name: cloud.name,
+              icon: cloud.icon,
+              frequency: cloud.frequency,
+              energyDemand: cloud.energy_demand,
+              order: cloud.order,
+              dependsOn: cloud.depends_on,
+              customFormType: cloud.custom_form_type,
+              createdAt: new Date(cloud.updated_at),
+              updatedAt: new Date(cloud.updated_at)
+            });
+          }
+        }
+      });
 
-    const interval = setInterval(() => {
-      currentStep++;
-      if (currentStep < steps.length) {
-        setSyncStatusText(steps[currentStep]);
-      } else {
-        clearInterval(interval);
-        setIsSyncing(false);
-        const now = new Date();
-        setLastSyncTime(
-          `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`
-        );
-        setToast({
-          show: true,
-          msg: `✨ 双向云端数据同步备份完成！共处理了 ${habitsCount + logsCount + cardsCount + recordsCount} 项数据。`,
-          type: "success",
-        });
-        setTimeout(() => setToast((prev) => ({ ...prev, show: false })), 4000);
+      cloudHabits?.forEach(cloud => {
+        const local = localHabitsMap.get(cloud.id);
+        if (!local) {
+          if (habitsDelIds.has(cloud.id)) {
+            const delRec = habitsDelLog.find(d => d.id === cloud.id);
+            const delTime = new Date(delRec?.deletedAt || 0).getTime();
+            const cloudTime = new Date(cloud.updated_at).getTime();
+            if (delTime > cloudTime) {
+              habitsDeleteInCloud.push(cloud.id);
+            } else {
+              habitsToLocal.push({
+                id: cloud.id,
+                name: cloud.name,
+                icon: cloud.icon,
+                frequency: cloud.frequency,
+                energyDemand: cloud.energy_demand,
+                order: cloud.order,
+                dependsOn: cloud.depends_on,
+                customFormType: cloud.custom_form_type,
+                createdAt: new Date(cloud.updated_at),
+                updatedAt: new Date(cloud.updated_at)
+              });
+            }
+          } else {
+            habitsToLocal.push({
+              id: cloud.id,
+              name: cloud.name,
+              icon: cloud.icon,
+              frequency: cloud.frequency,
+              energyDemand: cloud.energy_demand,
+              order: cloud.order,
+              dependsOn: cloud.depends_on,
+              customFormType: cloud.custom_form_type,
+              createdAt: new Date(cloud.updated_at),
+              updatedAt: new Date(cloud.updated_at)
+            });
+          }
+        }
+      });
+
+      if (habitsToCloud.length > 0) {
+        const { error } = await supabase.from("supabase_habits").upsert(habitsToCloud);
+        if (error) throw error;
       }
-    }, 700);
+      if (habitsToLocal.length > 0) {
+        await db.habits.bulkPut(habitsToLocal);
+      }
+      if (habitsDeleteInCloud.length > 0) {
+        const { error } = await supabase.from("supabase_habits").delete().in("id", habitsDeleteInCloud);
+        if (error) throw error;
+      }
+
+      // 步骤 2：同步打卡日志 (habitLogs)
+      setSyncStatusText("正在比对及增量合并打卡日志 (habit_logs)...");
+      const localLogs = await db.habitLogs.toArray();
+      const logsDelLog = await db.deletedRecords.where("tableName").equals("habitLogs").toArray();
+      const logsDelIds = new Set(logsDelLog.map(d => d.id));
+      
+      const { data: cloudLogs, error: errLogs } = await supabase.from("supabase_habit_logs").select("*");
+      if (errLogs) throw errLogs;
+      
+      const cloudLogsMap = new Map(cloudLogs?.map(c => [c.id, c]) || []);
+      const localLogsMap = new Map(localLogs.map(l => [l.id, l]));
+
+      const logsToCloud: any[] = [];
+      const logsToLocal: any[] = [];
+      const logsDeleteInCloud: string[] = [];
+
+      localLogs.forEach(local => {
+        const cloud = cloudLogsMap.get(local.id);
+        const localTime = new Date(local.updatedAt || local.createdAt).getTime();
+        if (!cloud) {
+          logsToCloud.push({
+            id: local.id,
+            habit_id: local.habitId,
+            date: local.date,
+            custom_data: local.customData || null,
+            image_url: local.imageUrl || null,
+            updated_at: local.updatedAt || local.createdAt || new Date()
+          });
+        } else {
+          const cloudTime = new Date(cloud.updated_at).getTime();
+          if (localTime > cloudTime) {
+            logsToCloud.push({
+              id: local.id,
+              habit_id: local.habitId,
+              date: local.date,
+              custom_data: local.customData || null,
+              image_url: local.imageUrl || null,
+              updated_at: local.updatedAt || local.createdAt || new Date()
+            });
+          } else if (cloudTime > localTime) {
+            logsToLocal.push({
+              id: cloud.id,
+              habitId: cloud.habit_id,
+              date: cloud.date,
+              customData: cloud.custom_data,
+              imageUrl: cloud.image_url,
+              createdAt: new Date(cloud.updated_at),
+              updatedAt: new Date(cloud.updated_at)
+            });
+          }
+        }
+      });
+
+      cloudLogs?.forEach(cloud => {
+        const local = localLogsMap.get(cloud.id);
+        if (!local) {
+          if (logsDelIds.has(cloud.id)) {
+            const delRec = logsDelLog.find(d => d.id === cloud.id);
+            const delTime = new Date(delRec?.deletedAt || 0).getTime();
+            const cloudTime = new Date(cloud.updated_at).getTime();
+            if (delTime > cloudTime) {
+              logsDeleteInCloud.push(cloud.id);
+            } else {
+              logsToLocal.push({
+                id: cloud.id,
+                habitId: cloud.habit_id,
+                date: cloud.date,
+                customData: cloud.custom_data,
+                imageUrl: cloud.image_url,
+                createdAt: new Date(cloud.updated_at),
+                updatedAt: new Date(cloud.updated_at)
+              });
+            }
+          } else {
+            logsToLocal.push({
+              id: cloud.id,
+              habitId: cloud.habit_id,
+              date: cloud.date,
+              customData: cloud.custom_data,
+              imageUrl: cloud.image_url,
+              createdAt: new Date(cloud.updated_at),
+              updatedAt: new Date(cloud.updated_at)
+            });
+          }
+        }
+      });
+
+      if (logsToCloud.length > 0) {
+        const { error } = await supabase.from("supabase_habit_logs").upsert(logsToCloud);
+        if (error) throw error;
+      }
+      if (logsToLocal.length > 0) {
+        await db.habitLogs.bulkPut(logsToLocal);
+      }
+      if (logsDeleteInCloud.length > 0) {
+        const { error } = await supabase.from("supabase_habit_logs").delete().in("id", logsDeleteInCloud);
+        if (error) throw error;
+      }
+
+      // 步骤 3：同步记忆卡片 (cards)
+      setSyncStatusText("正在比对及增量合并记忆闪卡 (cards)...");
+      const localCards = await db.cards.toArray();
+      const cardsDelLog = await db.deletedRecords.where("tableName").equals("cards").toArray();
+      const cardsDelIds = new Set(cardsDelLog.map(d => d.id));
+      
+      const { data: cloudCards, error: errCards } = await supabase.from("supabase_cards").select("*");
+      if (errCards) throw errCards;
+      
+      const cloudCardsMap = new Map(cloudCards?.map(c => [c.id, c]) || []);
+      const localCardsMap = new Map(localCards.map(c => [c.id, c]));
+
+      const cardsToCloud: any[] = [];
+      const cardsToLocal: any[] = [];
+      const cardsDeleteInCloud: string[] = [];
+
+      localCards.forEach(local => {
+        const cloud = cloudCardsMap.get(local.id);
+        const localTime = new Date(local.updatedAt || local.createdAt).getTime();
+        if (!cloud) {
+          cardsToCloud.push({
+            id: local.id,
+            front: local.front,
+            back: local.back,
+            tags: local.tags || [],
+            linked_cards: local.linkedCards || [],
+            reps: local.reps,
+            interval: local.interval,
+            ease: local.ease,
+            next_review: local.nextReview || new Date(),
+            updated_at: local.updatedAt || local.createdAt || new Date()
+          });
+        } else {
+          const cloudTime = new Date(cloud.updated_at).getTime();
+          if (localTime > cloudTime) {
+            cardsToCloud.push({
+              id: local.id,
+              front: local.front,
+              back: local.back,
+              tags: local.tags || [],
+              linked_cards: local.linkedCards || [],
+              reps: local.reps,
+              interval: local.interval,
+              ease: local.ease,
+              next_review: local.nextReview || new Date(),
+              updated_at: local.updatedAt || local.createdAt || new Date()
+            });
+          } else if (cloudTime > localTime) {
+            cardsToLocal.push({
+              id: cloud.id,
+              front: cloud.front,
+              back: cloud.back,
+              tags: cloud.tags || [],
+              linkedCards: cloud.linked_cards || [],
+              reps: cloud.reps,
+              interval: cloud.interval,
+              ease: Number(cloud.ease),
+              nextReview: new Date(cloud.next_review),
+              createdAt: new Date(cloud.updated_at),
+              updatedAt: new Date(cloud.updated_at)
+            });
+          }
+        }
+      });
+
+      cloudCards?.forEach(cloud => {
+        const local = localCardsMap.get(cloud.id);
+        if (!local) {
+          if (cardsDelIds.has(cloud.id)) {
+            const delRec = cardsDelLog.find(d => d.id === cloud.id);
+            const delTime = new Date(delRec?.deletedAt || 0).getTime();
+            const cloudTime = new Date(cloud.updated_at).getTime();
+            if (delTime > cloudTime) {
+              cardsDeleteInCloud.push(cloud.id);
+            } else {
+              cardsToLocal.push({
+                id: cloud.id,
+                front: cloud.front,
+                back: cloud.back,
+                tags: cloud.tags || [],
+                linkedCards: cloud.linked_cards || [],
+                reps: cloud.reps,
+                interval: cloud.interval,
+                ease: Number(cloud.ease),
+                nextReview: new Date(cloud.next_review),
+                createdAt: new Date(cloud.updated_at),
+                updatedAt: new Date(cloud.updated_at)
+              });
+            }
+          } else {
+            cardsToLocal.push({
+              id: cloud.id,
+              front: cloud.front,
+              back: cloud.back,
+              tags: cloud.tags || [],
+              linkedCards: cloud.linked_cards || [],
+              reps: cloud.reps,
+              interval: cloud.interval,
+              ease: Number(cloud.ease),
+              nextReview: new Date(cloud.next_review),
+              createdAt: new Date(cloud.updated_at),
+              updatedAt: new Date(cloud.updated_at)
+            });
+          }
+        }
+      });
+
+      if (cardsToCloud.length > 0) {
+        const { error } = await supabase.from("supabase_cards").upsert(cardsToCloud);
+        if (error) throw error;
+      }
+      if (cardsToLocal.length > 0) {
+        await db.cards.bulkPut(cardsToLocal);
+      }
+      if (cardsDeleteInCloud.length > 0) {
+        const { error } = await supabase.from("supabase_cards").delete().in("id", cardsDeleteInCloud);
+        if (error) throw error;
+      }
+
+      // 步骤 4：同步每日意图 (dailyRecords)
+      setSyncStatusText("正在比对及增量合并每日意图 (daily_records)...");
+      const localRecords = await db.dailyRecords.toArray();
+      
+      const { data: cloudRecords, error: errRecords } = await supabase.from("supabase_daily_records").select("*");
+      if (errRecords) throw errRecords;
+
+      const cloudRecordsMap = new Map(cloudRecords?.map(c => [c.date, c]) || []);
+      const recordsToCloud: any[] = [];
+      const recordsToLocal: any[] = [];
+
+      localRecords.forEach(local => {
+        const cloud = cloudRecordsMap.get(local.date);
+        const localTime = new Date(local.updatedAt || local.createdAt).getTime();
+        if (!cloud) {
+          recordsToCloud.push({
+            date: local.date,
+            woop_wish: local.woopWish || null,
+            woop_outcome: local.woopOutcome || null,
+            woop_obstacle: local.woopObstacle || null,
+            woop_plan: local.woopPlan || null,
+            energy_level: local.energyLevel || 5,
+            review_questions: local.reviewQuestions || [],
+            review_answers: local.reviewAnswers || [],
+            review_completed_at: local.reviewCompletedAt || null,
+            ai_tasks: local.aiTasks || null,
+            updated_at: local.updatedAt || local.createdAt || new Date()
+          });
+        } else {
+          const cloudTime = new Date(cloud.updated_at).getTime();
+          if (localTime > cloudTime) {
+            recordsToCloud.push({
+              date: local.date,
+              woop_wish: local.woopWish || null,
+              woop_outcome: local.woopOutcome || null,
+              woop_obstacle: local.woopObstacle || null,
+              woop_plan: local.woopPlan || null,
+              energy_level: local.energyLevel || 5,
+              review_questions: local.reviewQuestions || [],
+              review_answers: local.reviewAnswers || [],
+              review_completed_at: local.reviewCompletedAt || null,
+              ai_tasks: local.aiTasks || null,
+              updated_at: local.updatedAt || local.createdAt || new Date()
+            });
+          } else if (cloudTime > localTime) {
+            recordsToLocal.push({
+              date: cloud.date,
+              woopWish: cloud.woop_wish || undefined,
+              woopOutcome: cloud.woop_outcome || undefined,
+              woopObstacle: cloud.woop_obstacle || undefined,
+              woopPlan: cloud.woop_plan || undefined,
+              energyLevel: cloud.energy_level,
+              reviewQuestions: cloud.review_questions || undefined,
+              reviewAnswers: cloud.review_answers || undefined,
+              reviewCompletedAt: cloud.review_completed_at ? new Date(cloud.review_completed_at) : undefined,
+              aiTasks: cloud.ai_tasks || undefined,
+              createdAt: new Date(cloud.updated_at),
+              updatedAt: new Date(cloud.updated_at)
+            });
+          }
+        }
+      });
+
+      cloudRecords?.forEach(cloud => {
+        const local = localRecords.find(r => r.date === cloud.date);
+        if (!local) {
+          recordsToLocal.push({
+            date: cloud.date,
+            woopWish: cloud.woop_wish || undefined,
+            woopOutcome: cloud.woop_outcome || undefined,
+            woopObstacle: cloud.woop_obstacle || undefined,
+            woopPlan: cloud.woop_plan || undefined,
+            energyLevel: cloud.energy_level,
+            reviewQuestions: cloud.review_questions || undefined,
+            reviewAnswers: cloud.review_answers || undefined,
+            reviewCompletedAt: cloud.review_completed_at ? new Date(cloud.review_completed_at) : undefined,
+            aiTasks: cloud.ai_tasks || undefined,
+            createdAt: new Date(cloud.updated_at),
+            updatedAt: new Date(cloud.updated_at)
+          });
+        }
+      });
+
+      if (recordsToCloud.length > 0) {
+        const { error } = await supabase.from("supabase_daily_records").upsert(recordsToCloud);
+        if (error) throw error;
+      }
+      if (recordsToLocal.length > 0) {
+        await db.dailyRecords.bulkPut(recordsToLocal);
+      }
+
+      // 同步完成，清空本地已同步的删除日志记录表
+      await db.deletedRecords.clear();
+
+      setIsSyncing(false);
+      const now = new Date();
+      setLastSyncTime(
+        `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`
+      );
+
+      // 触发 Confetti 全屏纸屑粒子动效
+      confetti({
+        particleCount: 150,
+        spread: 80,
+        origin: { y: 0.6 }
+      });
+
+      const totalItemsSynced = habitsToCloud.length + habitsToLocal.length + 
+                               logsToCloud.length + logsToLocal.length + 
+                               cardsToCloud.length + cardsToLocal.length + 
+                               recordsToCloud.length + recordsToLocal.length;
+
+      setToast({
+        show: true,
+        msg: `✨ 云端双向同步备份成功！共合并了 ${totalItemsSynced} 项自律历史数据。`,
+        type: "success",
+      });
+      setTimeout(() => setToast((prev) => ({ ...prev, show: false })), 4000);
+
+    } catch (e: any) {
+      console.error("Supabase 同步异常:", e);
+      setIsSyncing(false);
+      setToast({
+        show: true,
+        msg: `❌ 同步失败：${e.message || "云端数据库连接超时或建表 SQL 缺失。"}` ,
+        type: "error",
+      });
+      setTimeout(() => setToast((prev) => ({ ...prev, show: false })), 5000);
+    }
   };
 
   // 注销登录
@@ -150,24 +612,33 @@ export default function SettingsView() {
     e.preventDefault();
     if (!name.trim()) return;
 
+    // 获取当前习惯总数作为 order 默认排序值
+    const habitsCount = await db.habits.count();
+
     await db.habits.add({
       id: crypto.randomUUID(),
       name: name.trim(),
       icon,
       frequency: "daily",
       energyDemand,
+      dependsOn: dependsOn || undefined,
+      customFormType,
+      order: habitsCount,
       createdAt: new Date(),
     });
 
     setName("");
     setIcon("Code");
     setEnergyDemand("medium");
+    setDependsOn("");
+    setCustomFormType("none");
   };
 
   // 删除习惯
   const handleDeleteHabit = async (id: string) => {
     if (confirm("确定要删除这个习惯项吗？删除后相关的今日打卡记录仍会保留，但它不会再出现在 Dashboard 上。")) {
       await db.habits.delete(id);
+      await trackDeletion("habits", id);
     }
   };
 
@@ -203,33 +674,48 @@ export default function SettingsView() {
                 暂无配置习惯，请通过右侧表单添加。
               </div>
             ) : (
-              habits.map((habit) => (
-                <div
-                  key={habit.id}
-                  className="flex items-center justify-between p-4 bg-surface-1 rounded-xl border border-border-subtle hover:border-text-secondary transition-colors duration-150"
-                >
-                  <div className="flex items-center gap-3">
-                    <div className="w-8 h-8 rounded-lg bg-surface-3 flex items-center justify-center text-primary">
-                      {getIconPreview(habit.icon)}
-                    </div>
-                    <div>
-                      <p className="text-sm font-semibold text-text-primary">
-                        {habit.name}
-                      </p>
-                      <span className="text-[10px] text-text-secondary uppercase tracking-widest font-mono">
-                        频次: 每日 · 能量负荷: {habit.energyDemand}
-                      </span>
-                    </div>
-                  </div>
-
-                  <button
-                    onClick={() => handleDeleteHabit(habit.id)}
-                    className="p-2 text-text-secondary hover:text-error transition-colors rounded-lg bg-surface-2 hover:bg-surface-3"
+              [...habits].sort((a, b) => (a.order ?? 0) - (b.order ?? 0)).map((habit) => {
+                const parentHabit = habits.find((h) => h.id === habit.dependsOn);
+                return (
+                  <div
+                    key={habit.id}
+                    className="flex items-center justify-between p-4 bg-surface-1 rounded-xl border border-border-subtle hover:border-text-secondary transition-colors duration-150"
                   >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              ))
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-lg bg-surface-3 flex items-center justify-center text-primary">
+                        {getIconPreview(habit.icon)}
+                      </div>
+                      <div>
+                        <p className="text-sm font-semibold text-text-primary">
+                          {habit.name}
+                        </p>
+                        <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                          <span className="text-[10px] text-text-secondary uppercase tracking-widest font-mono">
+                            能量负荷: {habit.energyDemand}
+                          </span>
+                          {parentHabit && (
+                            <span className="text-[9px] bg-amber-500/10 text-amber-500 font-mono px-1.5 py-0.5 rounded border border-amber-500/20">
+                              🔒 依赖于: {parentHabit.name}
+                            </span>
+                          )}
+                          {habit.customFormType && habit.customFormType !== "none" && (
+                            <span className="text-[9px] bg-ai-blue/10 text-ai-blue font-mono px-1.5 py-0.5 rounded border border-ai-blue/20">
+                              📋 {habit.customFormType === "fitness" ? "健身特化" : "社交特化"}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    <button
+                      onClick={() => handleDeleteHabit(habit.id)}
+                      className="p-2 text-text-secondary hover:text-error transition-colors rounded-lg bg-surface-2 hover:bg-surface-3"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                );
+              })
             )}
           </div>
         </section>
@@ -316,6 +802,55 @@ export default function SettingsView() {
                       }`}
                     >
                       {level.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* 前置习惯依赖 */}
+            <div className="space-y-1.5">
+              <label className="text-[10px] uppercase font-bold tracking-widest text-text-secondary font-mono block">
+                前置捆绑习惯 (Depends On)
+              </label>
+              <select
+                value={dependsOn}
+                onChange={(e) => setDependsOn(e.target.value)}
+                className="w-full px-3 py-2 bg-surface-2 rounded-lg border border-border-subtle focus:border-primary text-xs text-text-primary outline-none font-mono"
+              >
+                <option value="">无前置依赖 (独立习惯)</option>
+                {habits.map((h) => (
+                  <option key={h.id} value={h.id}>
+                    🔒 依赖于: {h.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* 特化记录表单类型 */}
+            <div className="space-y-1.5">
+              <label className="text-[10px] uppercase font-bold tracking-widest text-text-secondary font-mono block">
+                数据记录表单类型
+              </label>
+              <div className="grid grid-cols-3 gap-2">
+                {[
+                  { val: "none", label: "常规打卡" },
+                  { val: "fitness", label: "健身特化" },
+                  { val: "social", label: "社交复盘" },
+                ].map((formType) => {
+                  const isSelected = customFormType === formType.val;
+                  return (
+                    <button
+                      key={formType.val}
+                      type="button"
+                      onClick={() => setCustomFormType(formType.val as any)}
+                      className={`py-1.5 rounded-lg border text-[10px] font-bold transition-all ${
+                        isSelected
+                          ? "border-primary bg-primary/10 text-primary"
+                          : "border-border-subtle bg-surface-2 text-text-secondary hover:border-text-secondary"
+                      }`}
+                    >
+                      {formType.label}
                     </button>
                   );
                 })}
