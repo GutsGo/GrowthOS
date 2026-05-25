@@ -1,26 +1,33 @@
-"use client";
+'use client';
 
-import React, { useState, useEffect, useRef, useMemo } from "react";
-import { useAppStore } from "@/lib/store";
-import { db, Card, trackDeletion } from "@/lib/db";
-import { useLiveQuery } from "dexie-react-hooks";
-import { motion, AnimatePresence } from "framer-motion";
+import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { useAppStore } from '@/lib/store';
+import { db, Card, trackDeletion } from '@/lib/db';
+import { useLiveQuery } from 'dexie-react-hooks';
+import { motion, AnimatePresence } from 'framer-motion';
+import { apiFetch } from '@/lib/api';
 
 // ==========================================
 // 辅助函数：睡前回忆文本处理与 LCS 相似度比对
 // ==========================================
 const stripHtml = (html: string) => {
-  if (typeof window !== "undefined") {
-    const tmp = document.createElement("DIV");
+  if (typeof window !== 'undefined') {
+    const tmp = document.createElement('DIV');
     tmp.innerHTML = html;
-    return tmp.textContent || tmp.innerText || "";
+    return tmp.textContent || tmp.innerText || '';
   }
-  return html.replace(/<\/?[^>]+(>|$)/g, "");
+  return html.replace(/<\/?[^>]+(>|$)/g, '');
 };
 
 const calculateLCS = (text1: string, text2: string) => {
-  const s1 = text1.trim().replace(/[\s\p{P}]+/gu, "").toLowerCase();
-  const s2 = text2.trim().replace(/[\s\p{P}]+/gu, "").toLowerCase();
+  const s1 = text1
+    .trim()
+    .replace(/[\s\p{P}]+/gu, '')
+    .toLowerCase();
+  const s2 = text2
+    .trim()
+    .replace(/[\s\p{P}]+/gu, '')
+    .toLowerCase();
   if (!s1 || !s2) return 0;
 
   const m = s1.length;
@@ -43,17 +50,19 @@ const calculateLCS = (text1: string, text2: string) => {
 };
 
 const highlightMatchedText = (userText: string, correctText: string) => {
-  if (!userText) return "";
+  if (!userText) return '';
   const correctClean = correctText.toLowerCase();
   const chars = Array.from(userText);
-  return chars.map((char) => {
-    const cleanC = char.trim().toLowerCase();
-    if (!cleanC || /[\s\p{P}]/u.test(cleanC)) return char;
-    if (correctClean.includes(cleanC)) {
-      return `<span class="text-primary font-bold">${char}</span>`;
-    }
-    return char;
-  }).join("");
+  return chars
+    .map((char) => {
+      const cleanC = char.trim().toLowerCase();
+      if (!cleanC || /[\s\p{P}]/u.test(cleanC)) return char;
+      if (correctClean.includes(cleanC)) {
+        return `<span class="text-primary font-bold">${char}</span>`;
+      }
+      return char;
+    })
+    .join('');
 };
 import {
   Zap,
@@ -71,9 +80,9 @@ import {
   Trash2,
   Plus,
   FileText,
-} from "lucide-react";
-import SpotlightCard from "./reactbits/SpotlightCard";
-import Squares from "./reactbits/Squares";
+} from 'lucide-react';
+import SpotlightCard from './reactbits/SpotlightCard';
+import Squares from './reactbits/Squares';
 
 export default function FlowView() {
   const {
@@ -94,12 +103,12 @@ export default function FlowView() {
   // 白噪音播放状态管理
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const [isPlayingNoise, setIsPlayingNoise] = useState(false);
-  const [noiseType, setNoiseType] = useState<"none" | "rain" | "cafe">("none");
+  const [noiseType, setNoiseType] = useState<'none' | 'rain' | 'cafe'>('none');
   const [noiseVolume, setNoiseVolume] = useState(0.4);
 
   const noiseSources = {
-    rain: "https://www.soundjay.com/nature/sounds/rain-07.mp3",
-    cafe: "https://www.soundjay.com/misc/sounds/ambient-dining-room-1.mp3",
+    rain: 'https://www.soundjay.com/nature/sounds/rain-07.mp3',
+    cafe: 'https://www.soundjay.com/misc/sounds/ambient-dining-room-1.mp3',
   };
 
   // Web Audio API 警报蜂鸣音合成器
@@ -111,7 +120,7 @@ export default function FlowView() {
       const playTone = (delay: number, duration: number, freq: number) => {
         const osc = audioCtx.createOscillator();
         const gain = audioCtx.createGain();
-        osc.type = "sine";
+        osc.type = 'sine';
         osc.frequency.setValueAtTime(freq, audioCtx.currentTime + delay);
         gain.gain.setValueAtTime(0.15, audioCtx.currentTime + delay);
         gain.gain.exponentialRampToValueAtTime(
@@ -127,14 +136,14 @@ export default function FlowView() {
       playTone(0.5, 0.4, 523.25);
       playTone(1.0, 0.6, 659.25); // E5
     } catch (err) {
-      console.error("蜂鸣警报音播放失败:", err);
+      console.error('蜂鸣警报音播放失败:', err);
     }
   };
 
   // 申请浏览器推送通知权限
   useEffect(() => {
-    if (typeof window !== "undefined" && "Notification" in window) {
-      if (Notification.permission === "default") {
+    if (typeof window !== 'undefined' && 'Notification' in window) {
+      if (Notification.permission === 'default') {
         Notification.requestPermission();
       }
     }
@@ -142,19 +151,19 @@ export default function FlowView() {
 
   const sendFocusNotification = () => {
     if (
-      typeof window !== "undefined" &&
-      "Notification" in window &&
-      Notification.permission === "granted"
+      typeof window !== 'undefined' &&
+      'Notification' in window &&
+      Notification.permission === 'granted'
     ) {
-      new Notification("🎯 GrowthOS 专注结束", {
-        body: "恭喜完成一次深度专注！现在请休息 5 分钟，让大脑充充电，或开始费曼输出吧。",
+      new Notification('🎯 GrowthOS 专注结束', {
+        body: '恭喜完成一次深度专注！现在请休息 5 分钟，让大脑充充电，或开始费曼输出吧。',
       });
     }
   };
 
   // 白噪音播放切换逻辑
   useEffect(() => {
-    if (noiseType === "none") {
+    if (noiseType === 'none') {
       if (audioRef.current) {
         audioRef.current.pause();
         audioRef.current = null;
@@ -176,7 +185,7 @@ export default function FlowView() {
     if (isPlayingNoise) {
       audioRef.current
         .play()
-        .catch((err) => console.log("白噪音播放需要交互授权:", err));
+        .catch((err) => console.log('白噪音播放需要交互授权:', err));
     } else {
       audioRef.current.pause();
     }
@@ -236,14 +245,14 @@ export default function FlowView() {
   const formatTime = (totalSecs: number) => {
     const mins = Math.floor(totalSecs / 60);
     const secs = totalSecs % 60;
-    return `${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
+    return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
   };
 
   // ==========================================
   // 2. 费曼输出板逻辑
   // ==========================================
-  const [feynmanTopic, setFeynmanTopic] = useState("");
-  const [feynmanContent, setFeynmanContent] = useState("");
+  const [feynmanTopic, setFeynmanTopic] = useState('');
+  const [feynmanContent, setFeynmanContent] = useState('');
   const [isFeynmanAnalysing, setIsFeynmanAnalysing] = useState(false);
   const [feynmanResult, setFeynmanResult] = useState<{
     score: number;
@@ -255,17 +264,22 @@ export default function FlowView() {
   const [currentFeynmanId, setCurrentFeynmanId] = useState<string | null>(null);
 
   // 实时查询本地 IndexedDB 中的历史费曼记录
-  const feynmanRecords = useLiveQuery(async () => {
-    return await db.feynmanRecords.orderBy("createdAt").reverse().toArray();
-  }) || [];
+  const feynmanRecords =
+    useLiveQuery(async () => {
+      return await db.feynmanRecords.orderBy('createdAt').reverse().toArray();
+    }) || [];
 
   // 保存记录至 IndexedDB
   const saveFeynmanRecord = async (
     topic: string,
     content: string,
-    result: { score: number; grade: string; tips: string[] }
+    result: { score: number; grade: string; tips: string[] },
   ) => {
-    const id = currentFeynmanId || (typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2, 15));
+    const id =
+      currentFeynmanId ||
+      (typeof crypto !== 'undefined' && crypto.randomUUID
+        ? crypto.randomUUID()
+        : Math.random().toString(36).substring(2, 15));
     const record = {
       id,
       topic,
@@ -282,8 +296,8 @@ export default function FlowView() {
   // 重置/新建费曼板
   const handleNewFeynman = () => {
     setCurrentFeynmanId(null);
-    setFeynmanTopic("");
-    setFeynmanContent("");
+    setFeynmanTopic('');
+    setFeynmanContent('');
     setFeynmanResult(null);
   };
 
@@ -303,7 +317,7 @@ export default function FlowView() {
   const handleDeleteFeynman = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
     await db.feynmanRecords.delete(id);
-    await trackDeletion("feynmanRecords", id);
+    await trackDeletion('feynmanRecords', id);
     if (currentFeynmanId === id) {
       handleNewFeynman();
     }
@@ -315,30 +329,30 @@ export default function FlowView() {
     setFeynmanResult(null);
 
     try {
-      const response = await fetch("/api/feynman", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+      const response = await apiFetch('/api/feynman', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ topic: feynmanTopic, content: feynmanContent }),
       });
 
-      if (!response.ok) throw new Error("大模型评审接口请求失败");
+      if (!response.ok) throw new Error('大模型评审接口请求失败');
 
       const data = await response.json();
 
-      if (data.error === "NO_API_KEY") {
+      if (data.error === 'NO_API_KEY') {
         await runLocalFeynmanSimulation(
-          "⚠️ 未检测到 API 密钥，已自动为您降级为本地模拟分析。请在 .env.local 中配置密钥以使用真实大模型。",
+          '⚠️ 未检测到 API 密钥，已自动为您降级为本地模拟分析。请在 .env.local 中配置密钥以使用真实大模型。',
         );
       } else if (data.error) {
-        throw new Error(data.message || "请求失败");
+        throw new Error(data.message || '请求失败');
       } else {
         setFeynmanResult(data);
         await saveFeynmanRecord(feynmanTopic, feynmanContent, data);
       }
     } catch (error) {
-      console.error("Feynman Audit Error:", error);
+      console.error('Feynman Audit Error:', error);
       await runLocalFeynmanSimulation(
-        "⚠️ 真实 AI 评审接口连接失败，已自动降级为本地模拟分析。请检查网络与后台服务。",
+        '⚠️ 真实 AI 评审接口连接失败，已自动降级为本地模拟分析。请检查网络与后台服务。',
       );
     } finally {
       setIsFeynmanAnalysing(false);
@@ -350,25 +364,25 @@ export default function FlowView() {
     let score = 70 + Math.min(Math.floor(wordCount / 10), 20);
     const suggestions = [
       warningMsg,
-      "你在解释该核心要点时使用了过多的抽象学术概念，对于零基础小白来说理解门槛较高。",
-      "建议加入生动的生活实例（例如：将‘工具调用’类比为‘去餐馆根据菜单点菜’）。",
+      '你在解释该核心要点时使用了过多的抽象学术概念，对于零基础小白来说理解门槛较高。',
+      '建议加入生动的生活实例（例如：将‘工具调用’类比为‘去餐馆根据菜单点菜’）。',
     ];
 
     if (
-      feynmanContent.includes("也就是说") ||
-      feynmanContent.includes("比如")
+      feynmanContent.includes('也就是说') ||
+      feynmanContent.includes('比如')
     ) {
       score += 5;
     } else {
       suggestions.push(
-        "可以多使用‘举个例子’、‘换句话说’来增强你口语化的输出直觉。",
+        '可以多使用‘举个例子’、‘换句话说’来增强你口语化的输出直觉。',
       );
     }
 
     const result = {
       score: Math.min(score, 100),
       tips: suggestions,
-      grade: score >= 90 ? "极易理解" : score >= 80 ? "基本易懂" : "较多术语",
+      grade: score >= 90 ? '极易理解' : score >= 80 ? '基本易懂' : '较多术语',
     };
 
     setFeynmanResult(result);
@@ -390,7 +404,7 @@ export default function FlowView() {
   // 主动回忆相关状态
   const [isActiveRecall, setIsActiveRecall] = useState(false);
   const [isRecallChecked, setIsRecallChecked] = useState(false);
-  const [userSpeechText, setUserSpeechText] = useState("");
+  const [userSpeechText, setUserSpeechText] = useState('');
   const [isListening, setIsListening] = useState(false);
   const [speechSupported, setSpeechSupported] = useState(true);
   const [similarityScore, setSimilarityScore] = useState<number | null>(null);
@@ -398,20 +412,21 @@ export default function FlowView() {
 
   // 初始化 SpeechRecognition 录音引擎
   useEffect(() => {
-    if (typeof window !== "undefined") {
+    if (typeof window !== 'undefined') {
       const SpeechRecognition =
-        (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+        (window as any).SpeechRecognition ||
+        (window as any).webkitSpeechRecognition;
       if (!SpeechRecognition) {
         setSpeechSupported(false);
       } else {
         const rec = new SpeechRecognition();
         rec.continuous = true;
         rec.interimResults = true;
-        rec.lang = "zh-CN";
+        rec.lang = 'zh-CN';
 
         rec.onresult = (event: any) => {
-          let interimTranscript = "";
-          let finalTranscript = "";
+          let interimTranscript = '';
+          let finalTranscript = '';
           for (let i = event.resultIndex; i < event.results.length; ++i) {
             if (event.results[i].isFinal) {
               finalTranscript += event.results[i][0].transcript;
@@ -423,7 +438,7 @@ export default function FlowView() {
         };
 
         rec.onerror = (event: any) => {
-          console.error("Speech recognition error:", event.error);
+          console.error('Speech recognition error:', event.error);
           setIsListening(false);
         };
 
@@ -442,12 +457,12 @@ export default function FlowView() {
     if (isListening) {
       recognitionRef.current.stop();
     } else {
-      setUserSpeechText("");
+      setUserSpeechText('');
       setIsListening(true);
       try {
         recognitionRef.current.start();
       } catch (err) {
-        console.error("Failed to start speech recognition:", err);
+        console.error('Failed to start speech recognition:', err);
       }
     }
   };
@@ -467,7 +482,7 @@ export default function FlowView() {
   // 切换卡片或退出复习时重置回忆状态
   useEffect(() => {
     setIsRecallChecked(false);
-    setUserSpeechText("");
+    setUserSpeechText('');
     setSimilarityScore(null);
     if (isListening && recognitionRef.current) {
       recognitionRef.current.stop();
@@ -538,7 +553,7 @@ export default function FlowView() {
         <button
           onClick={() => {
             setReviewMode(false);
-            setActiveTab("dashboard");
+            setActiveTab('dashboard');
           }}
           className="flex items-center gap-2 text-xs font-semibold text-text-secondary hover:text-text-primary transition-colors"
         >
@@ -563,22 +578,24 @@ export default function FlowView() {
               </span>
               <h2 className="text-xl font-bold">
                 {reviewCards.length === 0
-                  ? "全部搞定 🎉"
+                  ? '全部搞定 🎉'
                   : `复习队列中 [${currentCardIndex + 1}/${reviewCards.length}]`}
               </h2>
               {reviewCards.length > 0 && (
                 <div className="flex items-center gap-2 mt-1 px-3 py-1 bg-surface-1 border border-border-subtle rounded-full text-[11px] select-none">
-                  <span className="text-text-secondary font-medium">🧠 主动回忆模式</span>
+                  <span className="text-text-secondary font-medium">
+                    🧠 主动回忆模式
+                  </span>
                   <button
                     type="button"
                     onClick={() => setIsActiveRecall(!isActiveRecall)}
                     className={`w-8 h-4 rounded-full transition-colors relative ${
-                      isActiveRecall ? "bg-primary" : "bg-surface-3"
+                      isActiveRecall ? 'bg-primary' : 'bg-surface-3'
                     }`}
                   >
                     <div
                       className={`w-3.5 h-3.5 rounded-full bg-white absolute top-[1px] transition-all ${
-                        isActiveRecall ? "left-[13px]" : "left-[1px]"
+                        isActiveRecall ? 'left-[13px]' : 'left-[1px]'
                       }`}
                     />
                   </button>
@@ -604,7 +621,7 @@ export default function FlowView() {
                 <button
                   onClick={() => {
                     setReviewMode(false);
-                    setActiveTab("dashboard");
+                    setActiveTab('dashboard');
                   }}
                   className="bg-primary hover:bg-primary-hover text-primary-text font-bold text-xs uppercase tracking-widest px-6 py-2.5 rounded-lg transition-all duration-200 active:scale-95"
                 >
@@ -621,7 +638,7 @@ export default function FlowView() {
                   >
                     <motion.div
                       animate={{ rotateY: isFlipped ? 180 : 0 }}
-                      transition={{ duration: 0.4, ease: "easeInOut" }}
+                      transition={{ duration: 0.4, ease: 'easeInOut' }}
                       className="w-full h-full relative preserve-3d"
                     >
                       {/* 卡片正面 */}
@@ -645,18 +662,20 @@ export default function FlowView() {
                       {/* 卡片背面 */}
                       <SpotlightCard
                         spotlightColor="rgba(59, 130, 246, 0.2)"
-                        style={{ transform: "rotateY(180deg)" }}
+                        style={{ transform: 'rotateY(180deg)' }}
                         className="absolute inset-0 backface-hidden rounded-2xl p-5 flex flex-col justify-between shadow-xl"
                       >
                         <div className="flex justify-between items-center flex-shrink-0">
                           <span className="text-[10px] font-mono tracking-widest text-ai-blue font-bold uppercase">
                             BACK · 核心解答
                           </span>
-                          {isActiveRecall && isRecallChecked && similarityScore !== null && (
-                            <span className="text-[10px] font-mono font-bold text-primary bg-primary/10 px-1.5 py-0.5 rounded">
-                              🎯 回忆匹配度: {similarityScore}%
-                            </span>
-                          )}
+                          {isActiveRecall &&
+                            isRecallChecked &&
+                            similarityScore !== null && (
+                              <span className="text-[10px] font-mono font-bold text-primary bg-primary/10 px-1.5 py-0.5 rounded">
+                                🎯 回忆匹配度: {similarityScore}%
+                              </span>
+                            )}
                         </div>
 
                         {isActiveRecall && !isRecallChecked ? (
@@ -667,8 +686,12 @@ export default function FlowView() {
                             <div className="absolute inset-0 backdrop-blur-md bg-background-void/40 rounded-xl pointer-events-none -mx-2 -my-1" />
                             <div className="relative z-30 flex-1 flex flex-col justify-center gap-3">
                               <div className="text-center space-y-1">
-                                <span className="text-xs font-bold text-text-primary block">🧠 睡前主动回忆模式</span>
-                                <span className="text-[10px] text-text-secondary">请通过语音或打字默写回忆卡片背面解答</span>
+                                <span className="text-xs font-bold text-text-primary block">
+                                  🧠 睡前主动回忆模式
+                                </span>
+                                <span className="text-[10px] text-text-secondary">
+                                  请通过语音或打字默写回忆卡片背面解答
+                                </span>
                               </div>
 
                               <div className="space-y-2">
@@ -679,8 +702,8 @@ export default function FlowView() {
                                       onClick={toggleListening}
                                       className={`w-12 h-12 rounded-full flex items-center justify-center border transition-all duration-300 relative ${
                                         isListening
-                                          ? "bg-primary border-primary text-black shadow-[0_0_15px_rgba(29,185,84,0.5)] animate-pulse"
-                                          : "bg-surface-2 border-border-subtle text-text-secondary hover:text-text-primary hover:border-text-secondary"
+                                          ? 'bg-primary border-primary text-black shadow-[0_0_15px_rgba(29,185,84,0.5)] animate-pulse'
+                                          : 'bg-surface-2 border-border-subtle text-text-secondary hover:text-text-primary hover:border-text-secondary'
                                       }`}
                                     >
                                       <span className="text-lg">🎤</span>
@@ -689,15 +712,23 @@ export default function FlowView() {
                                       )}
                                     </button>
                                     <span className="text-[9px] text-text-secondary font-mono">
-                                      {isListening ? "正在聆听中... 点击停止" : "点击麦克风开始说话"}
+                                      {isListening
+                                        ? '正在聆听中... 点击停止'
+                                        : '点击麦克风开始说话'}
                                     </span>
                                   </div>
                                 ) : null}
 
                                 <textarea
                                   value={userSpeechText}
-                                  onChange={(e) => setUserSpeechText(e.target.value)}
-                                  placeholder={speechSupported ? "语音识别内容将在此显示，或直接在此打字输入..." : "当前浏览器不支持语音识别，请打字输入你的回答..."}
+                                  onChange={(e) =>
+                                    setUserSpeechText(e.target.value)
+                                  }
+                                  placeholder={
+                                    speechSupported
+                                      ? '语音识别内容将在此显示，或直接在此打字输入...'
+                                      : '当前浏览器不支持语音识别，请打字输入你的回答...'
+                                  }
                                   className="w-full p-2.5 bg-surface-3 border border-border-subtle rounded-lg text-xs outline-none focus:border-primary resize-none font-sans text-text-primary placeholder:text-text-secondary/50"
                                   rows={3}
                                 />
@@ -707,7 +738,12 @@ export default function FlowView() {
                             <div className="relative z-30 flex gap-2">
                               <button
                                 type="button"
-                                onClick={() => handleVerifyRecall(userSpeechText, activeCard.back)}
+                                onClick={() =>
+                                  handleVerifyRecall(
+                                    userSpeechText,
+                                    activeCard.back,
+                                  )
+                                }
                                 className="flex-1 py-2 bg-primary hover:bg-primary-hover text-primary-text font-bold text-xs uppercase tracking-widest rounded-lg transition-colors active:scale-95"
                               >
                                 核对答案
@@ -729,31 +765,40 @@ export default function FlowView() {
                             <div className="flex-1 flex flex-col justify-center text-center px-4 overflow-y-auto">
                               <div
                                 className="text-sm text-text-primary leading-relaxed prose prose-invert prose-sm max-w-none text-left"
-                                dangerouslySetInnerHTML={{ __html: activeCard.back }}
+                                dangerouslySetInnerHTML={{
+                                  __html: activeCard.back,
+                                }}
                               />
                             </div>
-                            
-                            {isActiveRecall && isRecallChecked && userSpeechText && (
-                              <div
-                                onClick={(e) => e.stopPropagation()}
-                                className="mt-3 p-3 bg-surface-2/60 border border-border-subtle rounded-xl text-left font-mono"
-                              >
-                                <span className="text-[9px] text-text-secondary uppercase tracking-widest font-bold block mb-1">
-                                  Your Recall Summary:
-                                </span>
+
+                            {isActiveRecall &&
+                              isRecallChecked &&
+                              userSpeechText && (
                                 <div
-                                  className="text-[11px] text-text-primary leading-relaxed break-all max-h-[80px] overflow-y-auto"
-                                  dangerouslySetInnerHTML={{
-                                    __html: highlightMatchedText(userSpeechText, stripHtml(activeCard.back))
-                                  }}
-                                />
-                              </div>
-                            )}
+                                  onClick={(e) => e.stopPropagation()}
+                                  className="mt-3 p-3 bg-surface-2/60 border border-border-subtle rounded-xl text-left font-mono"
+                                >
+                                  <span className="text-[9px] text-text-secondary uppercase tracking-widest font-bold block mb-1">
+                                    Your Recall Summary:
+                                  </span>
+                                  <div
+                                    className="text-[11px] text-text-primary leading-relaxed break-all max-h-[80px] overflow-y-auto"
+                                    dangerouslySetInnerHTML={{
+                                      __html: highlightMatchedText(
+                                        userSpeechText,
+                                        stripHtml(activeCard.back),
+                                      ),
+                                    }}
+                                  />
+                                </div>
+                              )}
                           </div>
                         )}
 
                         <span className="text-[10px] text-center text-text-secondary font-mono flex-shrink-0 mt-2">
-                          {isActiveRecall && !isRecallChecked ? "回答并核对后，可返回正面" : "点击卡片回到正面"}
+                          {isActiveRecall && !isRecallChecked
+                            ? '回答并核对后，可返回正面'
+                            : '点击卡片回到正面'}
                         </span>
                       </SpotlightCard>
                     </motion.div>
@@ -818,8 +863,8 @@ export default function FlowView() {
                   onClick={toggleTimer}
                   className={`flex-1 py-2.5 rounded-lg font-bold text-xs uppercase tracking-widest flex items-center justify-center gap-2 transition-all duration-200 active:scale-95 ${
                     isActive
-                      ? "bg-surface-2 border border-border-subtle text-text-primary hover:bg-surface-3"
-                      : "bg-primary text-primary-text hover:bg-primary-hover hover:scale-[1.02]"
+                      ? 'bg-surface-2 border border-border-subtle text-text-primary hover:bg-surface-3'
+                      : 'bg-primary text-primary-text hover:bg-primary-hover hover:scale-[1.02]'
                   }`}
                 >
                   {isActive ? (
@@ -850,8 +895,8 @@ export default function FlowView() {
                     onClick={() => setFlowTimerMinutes(mins)}
                     className={`flex-1 py-1 rounded-lg bg-surface-2 text-[10px] font-bold font-mono border transition-all duration-200 active:scale-95 ${
                       flowTimerMinutes === mins
-                        ? "border-primary text-primary"
-                        : "border-transparent text-text-secondary"
+                        ? 'border-primary text-primary'
+                        : 'border-transparent text-text-secondary'
                     } hover:text-text-primary hover:bg-surface-3`}
                   >
                     {mins}M
@@ -860,27 +905,27 @@ export default function FlowView() {
               </div>
 
               {/* 白噪音环境音量播放控制器 */}
-              <div className="w-full pt-4 border-t border-border-subtle/50 flex flex-col gap-3">
+              <div className="w-full pt-4 mt-4 border-t border-border-subtle/50 flex flex-col gap-3">
                 <div className="flex justify-between items-center text-[10px] uppercase font-bold tracking-widest text-text-secondary font-mono">
                   <span className="flex items-center gap-1">🎧 环境白噪音</span>
-                  {noiseType !== "none" && (
+                  {noiseType !== 'none' && (
                     <span className="text-primary font-bold lowercase">
-                      {noiseType} {isPlayingNoise ? "播放中" : "已暂停"}
+                      {noiseType} {isPlayingNoise ? '播放中' : '已暂停'}
                     </span>
                   )}
                 </div>
 
                 <div className="flex gap-2 w-full">
                   {[
-                    { type: "none" as const, label: "无" },
-                    { type: "rain" as const, label: "雨声" },
-                    { type: "cafe" as const, label: "咖啡馆" },
+                    { type: 'none' as const, label: '无' },
+                    { type: 'rain' as const, label: '雨声' },
+                    { type: 'cafe' as const, label: '咖啡馆' },
                   ].map((noise) => (
                     <button
                       key={noise.type}
                       onClick={() => {
                         setNoiseType(noise.type);
-                        if (noise.type !== "none") {
+                        if (noise.type !== 'none') {
                           setIsPlayingNoise(true);
                         } else {
                           setIsPlayingNoise(false);
@@ -888,8 +933,8 @@ export default function FlowView() {
                       }}
                       className={`flex-1 py-1.5 rounded-lg text-xs font-semibold border transition-all ${
                         noiseType === noise.type
-                          ? "bg-primary text-black border-primary font-bold"
-                          : "bg-surface-2 border-transparent text-text-secondary hover:text-text-primary"
+                          ? 'bg-primary text-black border-primary font-bold'
+                          : 'bg-surface-2 border-transparent text-text-secondary hover:text-text-primary'
                       }`}
                     >
                       {noise.label}
@@ -897,13 +942,13 @@ export default function FlowView() {
                   ))}
                 </div>
 
-                {noiseType !== "none" && (
+                {noiseType !== 'none' && (
                   <div className="flex items-center justify-between gap-3 pt-1">
                     <button
                       onClick={() => setIsPlayingNoise(!isPlayingNoise)}
                       className="px-3 py-1 bg-surface-3 hover:bg-surface-2 border border-border-subtle rounded-lg text-[10px] font-bold text-text-primary transition-colors"
                     >
-                      {isPlayingNoise ? "暂停" : "播放"}
+                      {isPlayingNoise ? '暂停' : '播放'}
                     </button>
 
                     <div className="flex-1 flex items-center gap-2">
@@ -966,7 +1011,7 @@ export default function FlowView() {
                   />
                 </div>
 
-                <div className="space-y-1.5">
+                <div className="space-y-1.5 mt-3">
                   <label className="text-[10px] uppercase font-bold tracking-widest text-ai-blue font-mono block">
                     通俗化解释讲述 (Markdown)
                   </label>
@@ -986,12 +1031,12 @@ export default function FlowView() {
                   }
                   className={`w-full py-2.5 rounded-lg font-bold text-xs uppercase tracking-widest flex items-center justify-center gap-2 transition-all duration-200 active:scale-95 ${
                     !feynmanTopic || !feynmanContent || isFeynmanAnalysing
-                      ? "bg-surface-3 text-text-secondary cursor-not-allowed"
-                      : "bg-primary text-primary-text hover:bg-primary-hover hover:scale-[1.02]"
+                      ? 'bg-surface-3 text-text-secondary cursor-not-allowed'
+                      : 'bg-primary text-primary-text hover:bg-primary-hover hover:scale-[1.02]'
                   }`}
                 >
                   {isFeynmanAnalysing ? (
-                     <>
+                    <>
                       <Sparkles className="w-3.5 h-3.5 animate-spin" />
                       <span>AI 判官深度分析中...</span>
                     </>
@@ -1022,8 +1067,8 @@ export default function FlowView() {
                       <span
                         className={`text-[10px] font-bold px-2 py-0.5 rounded font-mono ${
                           feynmanResult.score >= 85
-                            ? "bg-primary/20 text-primary"
-                            : "bg-amber-500/20 text-amber-500"
+                            ? 'bg-primary/20 text-primary'
+                            : 'bg-amber-500/20 text-amber-500'
                         }`}
                       >
                         评级: {feynmanResult.grade}
@@ -1080,8 +1125,8 @@ export default function FlowView() {
                         onClick={() => handleLoadFeynman(rec)}
                         className={`p-3 rounded-lg border text-left transition-all duration-200 cursor-pointer flex items-center justify-between group ${
                           currentFeynmanId === rec.id
-                            ? "bg-primary/5 border-primary/40"
-                            : "bg-surface-2 border-border-subtle hover:border-text-secondary"
+                            ? 'bg-primary/5 border-primary/40'
+                            : 'bg-surface-2 border-border-subtle hover:border-text-secondary'
                         }`}
                       >
                         <div className="flex-1 min-w-0 pr-2">
@@ -1092,19 +1137,19 @@ export default function FlowView() {
                             <span
                               className={`text-[9px] font-mono font-bold px-1.5 py-0.25 rounded shrink-0 ${
                                 rec.score >= 85
-                                  ? "bg-primary/10 text-primary"
-                                  : "bg-amber-500/10 text-amber-500"
+                                  ? 'bg-primary/10 text-primary'
+                                  : 'bg-amber-500/10 text-amber-500'
                               }`}
                             >
                               {rec.score}分
                             </span>
                           </div>
                           <span className="text-[10px] text-text-secondary mt-1 block">
-                            {new Date(rec.createdAt).toLocaleString("zh-CN", {
-                              month: "2-digit",
-                              day: "2-digit",
-                              hour: "2-digit",
-                              minute: "2-digit",
+                            {new Date(rec.createdAt).toLocaleString('zh-CN', {
+                              month: '2-digit',
+                              day: '2-digit',
+                              hour: '2-digit',
+                              minute: '2-digit',
                             })}
                           </span>
                         </div>

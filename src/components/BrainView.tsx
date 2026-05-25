@@ -9,6 +9,7 @@ import StarterKit from "@tiptap/starter-kit";
 import { Plugin, PluginKey } from "@tiptap/pm/state";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import { motion, AnimatePresence } from "framer-motion";
+import { apiFetch } from "@/lib/api";
 import {
   BookOpen,
   Plus,
@@ -22,6 +23,7 @@ import {
 import {
   ReactFlow,
   Background,
+  BackgroundVariant,
   Controls,
   Handle,
   Position,
@@ -337,7 +339,7 @@ export default function BrainView() {
 
     setIsExtracting(true);
     try {
-      const response = await fetch("/api/extract-cards", {
+      const response = await apiFetch("/api/extract-cards", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text: selectedText }),
@@ -950,7 +952,7 @@ export default function BrainView() {
           </p>
         </div>
 
-        <div className="w-full h-[400px] md:h-full relative bg-surface-1/5 border border-border-subtle/50 rounded-2xl overflow-hidden">
+        <div className="w-full h-[400px] md:h-full relative bg-surface-1/5 border border-border-subtle/50 overflow-hidden">
           {rfNodes.length === 0 ? (
             <div className="absolute inset-0 flex flex-col items-center justify-center text-[11px] text-neutral-gray gap-1">
               <HelpCircle className="w-6 h-6 stroke-[1.5]" />
@@ -974,10 +976,11 @@ export default function BrainView() {
               maxZoom={3}
             >
               <Background
-                color={theme === "dark" ? "#535353" : "#D4D4D8"}
+                variant={BackgroundVariant.Lines}
+                color={theme === "dark" ? "rgba(255, 255, 255, 0.08)" : "rgba(0, 0, 0, 0.05)"}
                 gap={16}
-                size={1}
-                className="opacity-20"
+                size={0.5}
+                className="opacity-60"
               />
               <Controls />
             </ReactFlow>
