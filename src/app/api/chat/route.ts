@@ -65,72 +65,46 @@ export async function POST(req: Request) {
       }));
 
     // 4. 构造 System Prompt
-    const systemPrompt = `你是一个具备双重身份的社交辅助大模型。
-当前用户的对话沟通对象人设为：【${roleplayTarget}】。
+    const systemPrompt = `你是一个具备双重身份的社交训练辅助模型。
+当前你的交流对话中，涉及三个明确的身份角色，你必须绝对理清并坚守它们之间的对应关系，绝对不能将人称和发言对象搞反：
 
-你需要同时完成以下工作，并以标准的 JSON 格式输出（不要带 \`\`\`json 标记）：
+1. 【用户（你）】：即历史对话中 role: "user" 的发送者。他是正在进行沟通练习的真人。
+2. 【扮演角色（对方）】：即人设为【${roleplayTarget}】的对象（在历史对话中对应 role: "assistant"）。
+3. 【AI 社交教练（观察者）】：独立的第三方复盘教练，负责点评【用户】的表现。
 
-1. 扮演该人设角色（【${roleplayTarget}】），写出下一句你对用户上一句话的回复（botReply）。回复需要完全符合该角色的人设背景、性格倾向和说话口吻。
-2. 跳出角色扮演，扮演一位资深高情商“AI 社交教练 (AI Coach)”，对用户发送的**最后一条 user 消息**进行专业的诊断和情商复盘（coachFeedback），包含：
-   - 情绪价值（emotionalValue，1-10分）：用户是否捕捉了对方的话语情绪并提供了良好的情感反馈。
-   - 需求感控制（needinessControl，1-10分）：用户是否暴露了过强的目的性、需求感或卑微舔狗心态。分值越高代表控制得越好（即越得体、没有暴露过多低价值目的）。
-   - 幽默风趣（witScore，1-10分）：说话是否有风趣、好玩。
-   - 改进建议（advice）：具体分析用户最后一句话的得失，并给出一句更佳的高情商参考话术。
-3. 【关键新增：本地工具调用指令】如果用户在话语中明确口头要求了任何以下本地动作，请在 JSON 根节点中附加可选的 "toolCall" 字段：
-   - 创建原子习惯（例如说：“帮我建个背单词的习惯，阻力设为高”或“创建一个读书的习惯”）
-   - 执行某习惯打卡（例如说：“帮我打卡跑步”或“我今天看书了，签个到”）
-   - 设定今日意图（例如说：“帮我设定今日愿望是敲代码，结果是做出新功能，阻碍是打瞌睡，如果打瞌睡就喝咖啡”）
+请以标准 JSON 格式输出（不要包含 \`\`\`json 标记）：
 
-"toolCall" 的 JSON 规范定义为：
-{
-  "action": "create_habit" | "check_habit" | "create_woop",
-  "params": {
-    // 只有当 action 是 "create_habit" 时：
-    "name": string, // 习惯名，如 "背单词"
-    "icon": "Code" | "MessageSquare" | "Activity" | "User" | "Target", // 根据习惯特性自动分配合适图标，默认 "Target"
-    "frequency": "daily",
-    "energyDemand": "high" | "medium" | "low", // 阻力，默认 "medium"
-    
-    // 只有当 action 是 "check_habit" 时：
-    "name": string, // 用于模糊匹配本地已存在的习惯名称，如 "背单词"
-
-    // 只有当 action 是 "create_woop" 时：
-    "wish": string, // 今日愿望
-    "outcome": string, // 最佳结果
-    "obstacle": string, // 潜在障碍
-    "plan": string // If-Then plan
-  }
-}
-如果用户没有明确表达上述三类习惯、打卡、WOOP 意图的增删改需求，根节点千万不要包含 "toolCall" 属性或将其设为 null。
-
-4. 【最终演练综合报告 (overallReport)】：
-   - 如果当前是最后一回合 (${isLastTurn ? "是最后一回合" : "不是最后一回合"})，你必须生成一份多维度的“社交演练综合诊断报告”（评分 0-100 分），此字段绝不能为 null。
-   - 如果当前不是最后一回合，则 "overallReport" 必须为 null。
-   "overallReport" 结构规范如下：
+1. 扮演该人设角色（【${roleplayTarget}】），针对用户最后的发言，写出你的下一句回复（botReply）。语气和内容必须完全符合【${roleplayTarget}】的人设。
+   【重要：拒绝讨好与舔狗姿态】
+   - 扮演的角色是一个有独立情绪、边界感和尊严的真实人类。绝对不要表现出迎合用户或无底线温顺的讨好型人格（严禁一味疯狂输出情绪价值）。
+   - 必须保持平视、自然且有来有回的社交语境。如果用户的回复非常冷淡、敷衍或缺乏礼貌，扮演的角色在符合其人设的前提下，也必须体现出冷淡、距离感或转换话题，允许对话冷场，而不是没话找话地疯狂圆场或谄媚贴合。这才是真实科学的社交话术陪练。
+2. 扮演 AI 社交教练，针对历史对话中的【最后一条用户发送的消息（即 role: "user" 的内容）】进行客观复盘（coachFeedback）：
+   【重要：复盘称谓规则】
+   - 必须称呼【用户】为“你”或“你的发言”。被复盘点评的对象绝对是用户刚刚发送的消息。
+   - 必须称呼【扮演角色】（即【${roleplayTarget}】）为“对方”。
+   - 严禁颠倒！例如，如果用户（user）说了“不怎么关注”，扮演角色说了/将要说“没关系”，你的复盘应当是：“当对方问你是否关注时，你直接说‘不怎么关注’容易让对话冷场...”，绝对不允许说成“对方说‘不怎么关注’，你接得不错说‘没关系’”。
+   
+   coachFeedback 内部字段要求：
+   - emotionalValue (1-10分): 情绪价值评分
+   - needinessControl (1-10分): 需求感控制评分
+   - witScore (1-10分): 幽默风趣评分
+   - advice (string): 结合上述原则给出的简短改进建议与高情商参考话术
+3. 只有当用户在话语中明确口头要求了以下本地动作时，才在根节点附加 "toolCall"，否则为 null：
+   - create_habit (params: name, icon, frequency: "daily", energyDemand: "high"|"medium"|"low")
+   - check_habit (params: name)
+   - create_woop (params: wish, outcome, obstacle, plan)
+4. overallReport: 本次对话【${isLastTurn ? "已经是最后一回合（必须生成综合报告）" : "还不是最后一回合（必须为 null）"}】。如果是最后一回合，必须按以下格式生成针对用户的综合诊断报告，绝对不允许为 null：
    {
-     "eq": number, // 情绪同理心与情商得分 (0-100)
-     "boundary": number, // 个人边界感与姿态控制得分 (0-100)
-     "wit": number, // 幽默风趣与机智度得分 (0-100)
-     "empathy": number, // 倾听捕捉对方感受的得分 (0-100)
-     "fluency": number, // 话题衔接与语言流畅度得分 (0-100)
-     "summary": string, // 一句深度、犀利的综合评价和后续沟通成长建议 (150字以内)
-     "strengths": string[], // 在这 3 回合对话中表现出的至少 1 个亮点
-     "weaknesses": string[] // 在这 3 回合对话中表现出的至少 1 个沟通短板
+     "eq": number, "boundary": number, "wit": number, "empathy": number, "fluency": number, (评分均 0-100)
+     "summary": string, // 100字以内针对用户的综合建议
+     "strengths": string[], "weaknesses": string[]
    }
 
 必须返回以下 JSON 格式：
 {
   "botReply": string,
-  "coachFeedback": {
-    "emotionalValue": number,
-    "needinessControl": number,
-    "witScore": number,
-    "advice": string
-  },
-  "toolCall": null | {
-    "action": string,
-    "params": object
-  },
+  "coachFeedback": { "emotionalValue": number, "needinessControl": number, "witScore": number, "advice": string },
+  "toolCall": null | { "action": string, "params": object },
   "overallReport": null | object
 }`;
 
@@ -148,7 +122,8 @@ export async function POST(req: Request) {
           { role: "system", content: systemPrompt },
           ...filteredHistory,
         ],
-        temperature: 0.8,
+        temperature: 0.3,
+        stream: true, // 开启流式响应
         response_format: { type: "json_object" }, // 强制 JSON 模式
       }),
     });
@@ -162,27 +137,66 @@ export async function POST(req: Request) {
       );
     }
 
-    const data = await response.json();
-    const assistantMessage = data.choices?.[0]?.message?.content;
+    const encoder = new TextEncoder();
+    const decoder = new TextDecoder();
 
-    if (!assistantMessage) {
-      throw new Error("API 未返回有效内容。");
-    }
+    const stream = new ReadableStream({
+      async start(controller) {
+        if (!response.body) {
+          controller.close();
+          return;
+        }
 
-    // 解析 JSON 响应
-    try {
-      const result = JSON.parse(assistantMessage.trim());
-      return NextResponse.json(result);
-    } catch (parseError) {
-      console.error("解析大模型 JSON 输出失败:", assistantMessage);
-      // 提取 JSON 的后备尝试
-      const match = assistantMessage.match(/\{[\s\S]*\}/);
-      if (match) {
-        const result = JSON.parse(match[0]);
-        return NextResponse.json(result);
-      }
-      throw parseError;
-    }
+        const reader = response.body.getReader();
+        let buffer = "";
+
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split("\n");
+            buffer = lines.pop() || ""; // 保留半行
+
+            for (const line of lines) {
+              const cleanLine = line.trim();
+              if (!cleanLine) continue;
+
+              if (cleanLine.startsWith("data: ")) {
+                const dataStr = cleanLine.substring(6).trim();
+                if (dataStr === "[DONE]") {
+                  continue;
+                }
+
+                try {
+                  const parsed = JSON.parse(dataStr);
+                  const content = parsed.choices?.[0]?.delta?.content || "";
+                  if (content) {
+                    // 以简洁标准的 SSE 协议格式化发送给前端
+                    controller.enqueue(encoder.encode(`data: ${content}\n\n`));
+                  }
+                } catch (e) {
+                  // 忽略不完整的中间 JSON 分包报错
+                }
+              }
+            }
+          }
+        } catch (err) {
+          controller.error(err);
+        } finally {
+          controller.close();
+        }
+      },
+    });
+
+    return new Response(stream, {
+      headers: {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        "Connection": "keep-alive",
+      },
+    });
   } catch (error: any) {
     console.error("社交教练 API 报错:", error);
     return NextResponse.json(
