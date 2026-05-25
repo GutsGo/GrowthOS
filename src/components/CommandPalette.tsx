@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState, useRef, useMemo } from "react";
 import { useAppStore, AppTab } from "@/lib/store";
-import { db, Habit, Card } from "@/lib/db";
+import { db, Habit, Card, trackDeletion } from "@/lib/db";
 import { useLiveQuery } from "dexie-react-hooks";
 import { AnimatePresence, motion } from "framer-motion";
 import {
@@ -140,6 +140,7 @@ export default function CommandPalette({ onTriggerWoopModal }: CommandPalettePro
               } else {
                 // 已打卡则取消打卡
                 await db.habitLogs.delete(existingLog.id);
+                await trackDeletion("habitLogs", existingLog.id);
               }
               closePalette();
             },

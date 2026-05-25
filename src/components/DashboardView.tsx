@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useMemo } from "react";
 import { useAppStore } from "@/lib/store";
-import { db, Habit, HabitLog, DailyRecord } from "@/lib/db";
+import { db, Habit, HabitLog, DailyRecord, trackDeletion } from "@/lib/db";
 import { useLiveQuery } from "dexie-react-hooks";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -19,8 +19,14 @@ import {
   Info,
   X,
   Target,
+  Lock,
+  Unlock,
+  ArrowUpDown,
+  RefreshCw,
 } from "lucide-react";
 import SpotlightCard from "./reactbits/SpotlightCard";
+import SpecializedRecordModal from "./SpecializedRecordModal";
+import { Reorder } from "framer-motion";
 
 const MotionSpotlightCard = motion.create(SpotlightCard);
 
@@ -114,6 +120,32 @@ export default function DashboardView({
     setMounted(true);
   }, []);
 
+  // 拖拽排序状态
+  const [sortedHabits, setSortedHabits] = useState<Habit[]>([]);
+  const [isSorting, setIsSorting] = useState(false);
+
+  useEffect(() => {
+    if (habits.length > 0) {
+      const sorted = [...habits].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+      setSortedHabits(sorted);
+    }
+  }, [habits]);
+
+  const handleSortEnd = async (newOrderList: Habit[]) => {
+    setSortedHabits(newOrderList);
+    for (let i = 0; i < newOrderList.length; i++) {
+      await db.habits.update(newOrderList[i].id, { order: i });
+    }
+  };
+
+  // 特化习惯打卡弹窗状态
+  const [isSpecializedOpen, setIsSpecializedOpen] = useState(false);
+  const [activeSpecializedHabit, setActiveSpecializedHabit] = useState<Habit | null>(null);
+
+  // AI 每日行动排程状态
+  const [isGeneratingTasks, setIsGeneratingTasks] = useState(false);
+  const [aiTasksParticles, setAiTasksParticles] = useState<Record<string, any[]>>({});
+
   // 晚间灵魂复盘状态
   const [isReviewing, setIsReviewing] = useState(false);
   const [isReviewLoading, setIsReviewLoading] = useState(false);
@@ -123,6 +155,150 @@ export default function DashboardView({
   const [ans3, setAns3] = useState("");
   const [particles, setParticles] = useState<any[]>([]);
   const [habitParticles, setHabitParticles] = useState<Record<string, any[]>>({});
+
+  // 统计历史 7 天打卡率，用于 AI RAG 调度
+  const getPast7DaysStats = async () => {
+    const last7Days: string[] = [];
+    for (let i = 1; i <= 7; i++) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      const year = d.getFullYear();
+      const month = String(d.getMonth() + 1).padStart(2, "0");
+      const date = String(d.getDate()).padStart(2, "0");
+      last7Days.push(`${year}-${month}-${date}`);
+    }
+
+    const logs = await db.habitLogs.where("date").anyOf(last7Days).toArray();
+    
+    return habits.map((habit) => {
+      const habitLogs = logs.filter((l) => l.habitId === habit.id);
+      return {
+        habitId: habit.id,
+        name: habit.name,
+        completedCount: habitLogs.length,
+        totalCount: 7,
+        rate: habitLogs.length / 7,
+      };
+    });
+  };
+
+  // 触发生成 AI 排程
+  const handleGenerateAiTasks = async () => {
+    setIsGeneratingTasks(true);
+    try {
+      const historyStats = await getPast7DaysStats();
+      const res = await fetch("/api/generate-tasks", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          energy,
+          woopWish: todayRecord?.woopWish || "",
+          woopPlan: todayRecord?.woopPlan || "",
+          historyStats,
+        }),
+      });
+
+      if (!res.ok) throw new Error("生成 AI 任务排程失败");
+      const data = await res.json() as { tasks: any[] };
+      
+      await db.dailyRecords.put({
+        date: currentDate,
+        woopWish: todayRecord?.woopWish || "",
+        woopOutcome: todayRecord?.woopOutcome || "",
+        woopObstacle: todayRecord?.woopObstacle || "",
+        woopPlan: todayRecord?.woopPlan || "",
+        energyLevel: energy,
+        reviewQuestions: todayRecord?.reviewQuestions || [],
+        reviewAnswers: todayRecord?.reviewAnswers || [],
+        reviewCompletedAt: todayRecord?.reviewCompletedAt || undefined,
+        createdAt: todayRecord?.createdAt || new Date(),
+        aiTasks: data.tasks.map((t: any) => ({ ...t, isCompleted: false })),
+        aiTasksGeneratedAt: new Date(),
+      });
+    } catch (e) {
+      console.error(e);
+      alert("AI 任务编排引擎异常，请检查网络或稍后重试");
+    } finally {
+      setIsGeneratingTasks(false);
+    }
+  };
+
+  // 切换 AI 任务完成状态
+  const toggleAiTask = async (taskId: string) => {
+    if (!todayRecord || !todayRecord.aiTasks) return;
+    
+    const updatedTasks = todayRecord.aiTasks.map((t) => {
+      if (t.id === taskId) {
+        const nextStatus = !t.isCompleted;
+        if (nextStatus) {
+          triggerAiTaskConfetti(taskId);
+        }
+        return {
+          ...t,
+          isCompleted: nextStatus,
+          completedAt: nextStatus ? new Date() : undefined,
+        };
+      }
+      return t;
+    });
+
+    await db.dailyRecords.put({
+      ...todayRecord,
+      aiTasks: updatedTasks,
+    });
+  };
+
+  const triggerAiTaskConfetti = (taskId: string) => {
+    const colors = ["#3b82f6", "#60a5fa", "#1DB954", "#10b981"];
+    const newParticles = Array.from({ length: 12 }).map((_, idx) => ({
+      id: idx,
+      angle: (idx / 12) * Math.PI * 2 + (Math.random() - 0.5) * 0.4,
+      speed: 4 + Math.random() * 5,
+      color: colors[Math.floor(Math.random() * colors.length)]
+    }));
+    setAiTasksParticles((prev) => ({ ...prev, [taskId]: newParticles }));
+    setTimeout(() => {
+      setAiTasksParticles((prev) => {
+        const next = { ...prev };
+        delete next[taskId];
+        return next;
+      });
+    }, 1000);
+  };
+
+  // 保存特化习惯打卡数据
+  const handleSaveSpecializedLog = async (customData: any, imageUrl?: string) => {
+    if (!activeSpecializedHabit) return;
+    
+    const habitId = activeSpecializedHabit.id;
+    await db.habitLogs.add({
+      id: crypto.randomUUID(),
+      habitId,
+      date: currentDate,
+      customData,
+      imageUrl,
+      createdAt: new Date(),
+    });
+
+    const colors = ["#1DB954", "#1ED760", "#3b82f6", "#10b981"];
+    const newParticles = Array.from({ length: 15 }).map((_, idx) => ({
+      id: idx,
+      angle: (idx / 15) * Math.PI * 2 + (Math.random() - 0.5) * 0.3,
+      speed: 5 + Math.random() * 6,
+      color: colors[Math.floor(Math.random() * colors.length)]
+    }));
+    setHabitParticles((prev) => ({ ...prev, [habitId]: newParticles }));
+    setTimeout(() => {
+      setHabitParticles((prev) => {
+        const next = { ...prev };
+        delete next[habitId];
+        return next;
+      });
+    }, 1000);
+
+    setIsSpecializedOpen(false);
+    setActiveSpecializedHabit(null);
+  };
 
   // 判定当前时间是否达到 21:00 晚间复盘最佳时间
   const [isAfterReviewTime, setIsAfterReviewTime] = useState(false);
@@ -167,11 +343,17 @@ export default function DashboardView({
           plan: todayRecord?.woopPlan || "",
         },
         energy: energy,
-        habits: habits.map((h) => ({
-          name: h.name,
-          logged: loggedHabitIds.has(h.id),
-        })),
+        habits: habits.map((h) => {
+          const log = todayLogs.find((l) => l.habitId === h.id);
+          return {
+            name: h.name,
+            logged: !!log,
+            customData: log?.customData || null,
+            customFormType: h.customFormType || "none",
+          };
+        }),
         cardsCount: overdueCardsCount,
+        aiTasks: todayRecord?.aiTasks || [],
       };
 
       const res = await fetch("/api/review", {
@@ -260,9 +442,37 @@ export default function DashboardView({
 
   // 打卡操作
   const toggleHabitLog = async (habitId: string) => {
+    // 1. 前置依赖习惯约束校验
+    const habit = habits.find((h) => h.id === habitId);
+    if (habit && habit.dependsOn) {
+      const isParentLogged = loggedHabitIds.has(habit.dependsOn);
+      if (!isParentLogged) {
+        const parent = habits.find((h) => h.id === habit.dependsOn);
+        alert(`🔒 行为链受限：请先完成前置习惯【${parent?.name || "前置习惯"}】的打卡！`);
+        return;
+      }
+    }
+
+    // 2. 拦截特化表单打卡，弹出 Modal 录入数据
+    if (habit && habit.customFormType && habit.customFormType !== "none") {
+      const isAlreadyLogged = loggedHabitIds.has(habitId);
+      if (isAlreadyLogged) {
+        const existing = await db.habitLogs.where({ habitId, date: currentDate }).first();
+        if (existing) {
+          await db.habitLogs.delete(existing.id);
+          await trackDeletion("habitLogs", existing.id);
+        }
+      } else {
+        setActiveSpecializedHabit(habit);
+        setIsSpecializedOpen(true);
+      }
+      return;
+    }
+
     const existing = await db.habitLogs.where({ habitId, date: currentDate }).first();
     if (existing) {
       await db.habitLogs.delete(existing.id);
+      await trackDeletion("habitLogs", existing.id);
     } else {
       await db.habitLogs.add({
         id: crypto.randomUUID(),
@@ -494,40 +704,97 @@ export default function DashboardView({
 
           {/* 习惯矩阵 */}
           <section className="space-y-3">
-            <h2 className="text-xs font-bold uppercase tracking-widest text-text-secondary font-mono flex items-center gap-2">
-              <span>⚡ 习惯打卡矩阵 (Habit Grid)</span>
-            </h2>
+            <div className="flex items-center justify-between">
+              <h2 className="text-xs font-bold uppercase tracking-widest text-text-secondary font-mono flex items-center gap-2">
+                <span>⚡ 习惯打卡矩阵 (Habit Grid)</span>
+              </h2>
+              {habits.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setIsSorting(!isSorting)}
+                  className="text-[10px] font-bold text-primary hover:underline flex items-center gap-1 font-mono uppercase"
+                >
+                  <ArrowUpDown className="w-3.5 h-3.5" />
+                  {isSorting ? "完成编排 (Done)" : "编排顺序 (Sort)"}
+                </button>
+              )}
+            </div>
             
             {habits.length === 0 ? (
               <div className="text-center py-8 text-xs text-text-secondary bg-surface-1 rounded-xl border border-border-subtle">
                 暂无习惯。请前往 [系统设置] 页面添加你的第一个原子习惯。
               </div>
+            ) : isSorting ? (
+              // ==========================================
+              // A. 拖拽排序编排模式 (单列大卡片)
+              // ==========================================
+              <Reorder.Group values={sortedHabits} onReorder={handleSortEnd} className="space-y-3">
+                {sortedHabits.map((habit) => (
+                  <Reorder.Item key={habit.id} value={habit} className="outline-none">
+                    <div className="bg-surface-1 border border-border-subtle hover:border-primary/50 p-4 rounded-xl flex items-center justify-between cursor-grab active:cursor-grabbing select-none transition-colors">
+                      <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-lg bg-surface-3 flex items-center justify-center text-text-secondary">
+                          <ArrowUpDown className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <p className="text-xs font-bold text-text-primary">{habit.name}</p>
+                          <span className="text-[9px] text-text-secondary uppercase tracking-widest font-mono">
+                            阻力: {habit.energyDemand} 能量 · {habit.customFormType && habit.customFormType !== "none" ? "📋 特化表单" : "常规打卡"}
+                          </span>
+                        </div>
+                      </div>
+                      <div className="w-8 h-8 rounded-lg bg-surface-2 flex items-center justify-center text-text-secondary">
+                        {getHabitIcon(habit.icon)}
+                      </div>
+                    </div>
+                  </Reorder.Item>
+                ))}
+              </Reorder.Group>
             ) : (
+              // ==========================================
+              // B. 正常展示与打卡模式 (两列网格)
+              // ==========================================
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {habits.map((habit) => {
+                {sortedHabits.map((habit) => {
                   const isLogged = loggedHabitIds.has(habit.id);
                   const isRecommended = habit.energyDemand === recommendedDemand && !isLogged;
                   
+                  // 前置依赖校验
+                  const parentHabit = habit.dependsOn ? habits.find((h) => h.id === habit.dependsOn) : null;
+                  const isLocked = parentHabit ? !loggedHabitIds.has(parentHabit.id) : false;
+
                   return (
                     <MotionSpotlightCard
                       key={habit.id}
-                      whileHover={{ scale: 1.03 }}
+                      whileHover={isLocked ? {} : { scale: 1.03 }}
                       transition={{ type: "spring", stiffness: 300, damping: 20 }}
                       onClick={() => toggleHabitLog(habit.id)}
-                      spotlightColor={isLogged ? "rgba(29, 185, 84, 0.25)" : isRecommended ? "rgba(29, 185, 84, 0.35)" : "rgba(29, 185, 84, 0.12)"}
-                      className={`relative rounded-xl border cursor-pointer select-none overflow-hidden ${
-                        isLogged
-                          ? "border-primary/40 shadow-[0_0_12px_rgba(29,185,84,0.15)]"
+                      spotlightColor={
+                        isLocked 
+                          ? "rgba(245, 158, 11, 0.05)" 
+                          : isLogged 
+                          ? "rgba(29, 185, 84, 0.25)" 
+                          : isRecommended 
+                          ? "rgba(29, 185, 84, 0.35)" 
+                          : "rgba(29, 185, 84, 0.12)"
+                      }
+                      className={`relative rounded-xl border select-none overflow-hidden transition-all ${
+                        isLocked
+                          ? "border-border-subtle opacity-50 cursor-not-allowed"
+                          : isLogged
+                          ? "border-primary/40 shadow-[0_0_12px_rgba(29,185,84,0.15)] cursor-pointer"
                           : isRecommended
-                          ? "border-primary shadow-[0_0_15px_rgba(29,185,84,0.25)]"
-                          : "border-border-subtle hover:border-text-secondary"
+                          ? "border-primary shadow-[0_0_15px_rgba(29,185,84,0.25)] cursor-pointer"
+                          : "border-border-subtle hover:border-text-secondary cursor-pointer"
                       }`}
                     >
                       <div className="w-full h-full flex items-center justify-between p-4">
                         <div className="flex items-center gap-3 min-w-0 flex-1">
                           <div
                             className={`w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 transition-colors ${
-                              isLogged
+                              isLocked
+                                ? "bg-surface-2 text-neutral-gray"
+                                : isLogged
                                 ? "bg-primary text-black"
                                 : isRecommended
                                 ? "bg-primary/20 text-primary animate-pulse"
@@ -539,15 +806,27 @@ export default function DashboardView({
                           <div className="min-w-0 flex-1">
                             <div className="flex items-center gap-1.5 flex-wrap">
                               <p className="text-sm font-bold text-text-primary truncate">{habit.name}</p>
-                              {isRecommended && (
+                              {isRecommended && !isLocked && (
                                 <span className="text-[9px] bg-primary/20 text-primary font-bold font-mono px-1.5 py-0.5 rounded uppercase tracking-wider flex-shrink-0">
                                   最宜
                                 </span>
                               )}
+                              {isLocked && (
+                                <span className="text-[9px] bg-amber-500/15 text-amber-500 font-bold font-mono px-1.5 py-0.5 rounded uppercase tracking-wider flex-shrink-0">
+                                  锁定
+                                </span>
+                              )}
                             </div>
-                            <span className="text-[10px] text-text-secondary uppercase tracking-widest font-mono block mt-0.5">
-                              阻力: {habit.energyDemand} 能量
-                            </span>
+                            
+                            {isLocked ? (
+                              <span className="text-[10px] text-amber-500 font-medium font-mono block mt-0.5 truncate">
+                                🔒 依赖于: {parentHabit?.name || "前置习惯"}
+                              </span>
+                            ) : (
+                              <span className="text-[10px] text-text-secondary uppercase tracking-widest font-mono block mt-0.5">
+                                阻力: {habit.energyDemand} 能量 · {habit.customFormType && habit.customFormType !== "none" ? "特化" : "常规"}
+                              </span>
+                            )}
                           </div>
                         </div>
                         
@@ -570,12 +849,18 @@ export default function DashboardView({
                             ))}
                             <div
                               className={`w-full h-full rounded-full border flex items-center justify-center transition-all ${
-                                isLogged
+                                isLocked
+                                  ? "border-border-subtle bg-surface-2 text-neutral-gray"
+                                  : isLogged
                                   ? "bg-primary border-primary text-black"
                                   : "border-muted-gray group-hover:border-text-secondary bg-transparent"
                               }`}
                             >
-                              {isLogged && <Check className="w-3.5 h-3.5 stroke-[3]" />}
+                              {isLocked ? (
+                                <Lock className="w-3 h-3 text-neutral-gray" />
+                              ) : isLogged ? (
+                                <Check className="w-3.5 h-3.5 stroke-[3]" />
+                              ) : null}
                             </div>
                           </div>
                         </div>
@@ -626,37 +911,130 @@ export default function DashboardView({
             </button>
           </SpotlightCard>
 
-          {/* AI 教练洞察 */}
+          {/* AI 每日行动排程 */}
           <SpotlightCard spotlightColor="rgba(59, 130, 246, 0.25)" className="p-5 flex flex-col gap-4 relative overflow-hidden">
             <div className="absolute -right-6 -bottom-6 w-24 h-24 bg-ai-blue/10 rounded-full blur-2xl z-0" />
-            <div className="flex items-center gap-2">
-              <div className="w-6 h-6 rounded-full bg-ai-blue/20 flex items-center justify-center">
-                <Sparkles className="w-3.5 h-3.5 text-ai-blue" />
+            <div className="flex items-center justify-between z-10">
+              <div className="flex items-center gap-2">
+                <div className="w-6 h-6 rounded-full bg-ai-blue/20 flex items-center justify-center">
+                  <Sparkles className="w-3.5 h-3.5 text-ai-blue" />
+                </div>
+                <span className="text-xs font-bold uppercase tracking-widest text-ai-blue font-mono">
+                  AI 每日任务排程
+                </span>
               </div>
-              <span className="text-xs font-bold uppercase tracking-widest text-ai-blue font-mono">
-                AI Coach Insight
-              </span>
+              
+              {todayRecord?.aiTasks && todayRecord.aiTasks.length > 0 && !isGeneratingTasks && (
+                <button
+                  type="button"
+                  onClick={handleGenerateAiTasks}
+                  className="text-text-secondary hover:text-primary transition-colors p-1"
+                  title="重新编排任务"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                </button>
+              )}
             </div>
 
-            <div>
-              <p className="text-xs text-text-primary leading-relaxed font-semibold">
-                “你今天尚未进行 AI 编码深度训练。根据当前的高能量状态（{energy}/10），我为你生成了一个 15 分钟的 TypeScript 泛型实战挑战，是否立即开启？”
-              </p>
-            </div>
+            <div className="z-10 space-y-3">
+              {isGeneratingTasks ? (
+                // A. 流式骨架屏状态
+                <div className="space-y-4 py-2">
+                  <div className="flex items-center justify-between">
+                    <div className="h-4 bg-surface-3 rounded animate-pulse w-1/3" />
+                    <div className="h-3.5 bg-surface-3 rounded animate-pulse w-1/4" />
+                  </div>
+                  <div className="border border-border-subtle/50 p-3 rounded-lg space-y-2 bg-surface-2/20">
+                    <div className="h-4 bg-surface-3 rounded animate-pulse w-2/3" />
+                    <div className="h-3 bg-surface-3 rounded animate-pulse w-full" />
+                    <div className="h-3 bg-surface-3 rounded animate-pulse w-5/6" />
+                  </div>
+                  <div className="border border-border-subtle/50 p-3 rounded-lg space-y-2 bg-surface-2/20">
+                    <div className="h-4 bg-surface-3 rounded animate-pulse w-1/2" />
+                    <div className="h-3 bg-surface-3 rounded animate-pulse w-full" />
+                  </div>
+                  <p className="text-[10px] text-text-secondary font-mono animate-pulse">AI 教练正在审阅您近7日打卡趋势，准备行为习惯拆解...</p>
+                </div>
+              ) : todayRecord?.aiTasks && todayRecord.aiTasks.length > 0 ? (
+                // B. 已生成任务列表展示
+                <div className="space-y-3.5">
+                  {todayRecord.aiTasks.map((task) => {
+                    const isCompleted = task.isCompleted;
+                    return (
+                      <div
+                        key={task.id}
+                        onClick={() => toggleAiTask(task.id)}
+                        className={`p-3 rounded-xl border select-none transition-all duration-200 cursor-pointer relative overflow-hidden bg-surface-2/40 ${
+                          isCompleted
+                            ? "border-primary/30 opacity-60 bg-surface-2/20"
+                            : "border-border-subtle hover:border-ai-blue hover:bg-surface-2/70"
+                        }`}
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className={`text-[8px] font-bold font-mono px-1.5 py-0.5 rounded uppercase tracking-wider ${
+                                task.energyDemand === "high"
+                                  ? "bg-error/15 text-error"
+                                  : task.energyDemand === "medium"
+                                  ? "bg-amber-500/15 text-amber-500"
+                                  : "bg-primary/15 text-primary"
+                              }`}>
+                                {task.energyDemand} 能耗
+                              </span>
+                              <p className={`text-xs font-bold text-text-primary ${isCompleted ? "line-through text-text-secondary" : ""}`}>
+                                {task.name}
+                              </p>
+                            </div>
+                            <p className="text-[10px] text-text-secondary mt-1.5 leading-relaxed font-mono">
+                              💡 依据: {task.reason}
+                            </p>
+                          </div>
 
-            <div className="flex gap-2 pt-2 z-10">
-              <button
-                onClick={handleAcceptChallenge}
-                className="flex-1 bg-primary hover:bg-primary-hover text-black transition-all duration-200 py-2 rounded-lg text-xs font-bold uppercase tracking-wider active:scale-95"
-              >
-                接受挑战 (15m)
-              </button>
-              <button
-                onClick={() => {}}
-                className="px-4 bg-surface-3/50 hover:bg-surface-2 border border-border-subtle transition-all duration-200 py-2 rounded-lg text-xs text-text-secondary active:scale-95"
-              >
-                忽略
-              </button>
+                          <div className="flex-shrink-0 relative w-5 h-5 flex items-center justify-center mt-0.5">
+                            {/* 局部打卡粒子特效 */}
+                            {aiTasksParticles[task.id] && aiTasksParticles[task.id].map((p) => (
+                              <motion.div
+                                key={p.id}
+                                className="absolute w-1 h-1 rounded-full pointer-events-none z-10"
+                                style={{ backgroundColor: p.color }}
+                                animate={{
+                                  x: Math.cos(p.angle) * p.speed * 3.5,
+                                  y: Math.sin(p.angle) * p.speed * 3.5,
+                                  scale: [1, 1.2, 0.1],
+                                  opacity: [1, 1, 0]
+                                }}
+                                transition={{ duration: 0.8, ease: "easeOut" }}
+                              />
+                            ))}
+                            <div className={`w-full h-full rounded-full border flex items-center justify-center transition-all ${
+                              isCompleted
+                                ? "bg-primary border-primary text-black"
+                                : "border-muted-gray bg-transparent"
+                            }`}>
+                              {isCompleted && <Check className="w-3 h-3 stroke-[3]" />}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                // C. 未生成状态
+                <div className="py-4 text-center space-y-4">
+                  <p className="text-xs text-text-secondary leading-relaxed max-w-[280px] mx-auto">
+                    今日尚未生成排程任务。AI Coach 将融合今日能量值及过去 7 天打卡惯性为您智能派发定制任务。
+                  </p>
+                  <button
+                    type="button"
+                    onClick={handleGenerateAiTasks}
+                    className="w-full bg-ai-blue hover:bg-blue-600 text-white font-bold text-xs uppercase tracking-widest py-2.5 rounded-lg transition-all duration-200 active:scale-95 shadow-[0_0_12px_rgba(59,130,246,0.2)]"
+                  >
+                    生成今日 AI 任务排程
+                  </button>
+                </div>
+              )}
             </div>
           </SpotlightCard>
 
@@ -933,6 +1311,17 @@ export default function DashboardView({
           </div>
         )}
       </AnimatePresence>
+
+      {/* 特化习惯打卡弹窗 */}
+      <SpecializedRecordModal
+        isOpen={isSpecializedOpen}
+        onClose={() => {
+          setIsSpecializedOpen(false);
+          setActiveSpecializedHabit(null);
+        }}
+        habit={activeSpecializedHabit}
+        onSave={handleSaveSpecializedLog}
+      />
     </div>
   );
 }
