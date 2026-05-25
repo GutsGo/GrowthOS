@@ -231,7 +231,7 @@ ${referenceNotes.length > 0 ? referenceNotes.join("\n\n---\n\n") : "无匹配笔
               { role: "system", content: systemPrompt },
               { role: "user", content: userPrompt },
             ],
-            temperature: 0.7,
+            temperature: 0.3,
             response_format: { type: "json_object" },
           }),
         });

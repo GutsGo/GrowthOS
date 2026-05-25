@@ -163,7 +163,7 @@ ${historyStats.length > 0 ? historyStats.map((h) => `- ${h.name} 打卡率: ${Ma
       body: JSON.stringify({
         model: model,
         messages: [{ role: "system", content: systemPrompt }],
-        temperature: 0.75,
+        temperature: 0.3,
         response_format: { type: "json_object" },
       }),
     });

@@ -76,7 +76,7 @@ ${content}`;
           { role: "system", content: systemPrompt },
           { role: "user", content: userPrompt },
         ],
-        temperature: 0.7,
+        temperature: 0.3,
         response_format: { type: "json_object" }, // 强制 JSON 模式（如果大模型支持）
       }),
     });

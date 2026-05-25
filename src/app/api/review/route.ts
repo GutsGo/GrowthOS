@@ -204,7 +204,7 @@ ${uncompletedTaskNames.length > 0 ? `- 未完成排程任务：${uncompletedTask
       body: JSON.stringify({
         model: model,
         messages: [{ role: "system", content: systemPrompt }],
-        temperature: 0.85,
+        temperature: 0.3,
         response_format: { type: "json_object" },
       }),
     });
