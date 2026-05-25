@@ -1,6 +1,6 @@
-"use client";
+'use client';
 
-import React, { useRef, useState } from "react";
+import React, { useRef, useState } from 'react';
 
 interface SpotlightCardProps extends React.HTMLAttributes<HTMLDivElement> {
   children: React.ReactNode;
@@ -10,8 +10,8 @@ interface SpotlightCardProps extends React.HTMLAttributes<HTMLDivElement> {
 
 export default function SpotlightCard({
   children,
-  className = "",
-  spotlightColor = "rgba(29, 185, 84, 0.12)",
+  className = '',
+  spotlightColor = 'rgba(29, 185, 84, 0.12)',
   ...props
 }: SpotlightCardProps) {
   const cardRef = useRef<HTMLDivElement>(null);
@@ -40,7 +40,7 @@ export default function SpotlightCard({
       onMouseMove={handleMouseMove}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
-      className={`relative overflow-hidden rounded-xl border border-border-subtle bg-surface-1 transition-all duration-300 ${className}`}
+      className={`relative overflow-hidden rounded-lg border border-border-subtle bg-surface-1 transition-all duration-300 ${className}`}
       {...props}
     >
       {/* 聚光灯光晕层，通过 radial-gradient 渐变展现跟随效果 */}

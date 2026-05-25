@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useRef, useState } from "react";
+import { useAppStore } from "@/lib/store";
 
 interface SquaresProps {
   className?: string;
@@ -13,12 +14,14 @@ interface SquaresProps {
 
 export default function Squares({
   className = "",
-  squareSize = 48,
+  squareSize = 15,
   gridGap = 1,
-  borderColor = "rgba(40, 40, 40, 0.25)",
+  borderColor,
   hoverFillColor = "rgba(29, 185, 84, 0.04)",
   speed = 0.05,
 }: SquaresProps) {
+  const theme = useAppStore((state) => state.theme);
+  const resolvedBorderColor = borderColor || (theme === "dark" ? "rgba(255, 255, 255, 0.32)" : "rgba(0, 0, 0, 0.20)");
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [hoveredSquare, setHoveredSquare] = useState<{ x: number; y: number } | null>(null);
 
@@ -90,8 +93,8 @@ export default function Squares({
           }
 
           // 绘制网格边框
-          ctx.strokeStyle = borderColor;
-          ctx.lineWidth = 1;
+          ctx.strokeStyle = resolvedBorderColor;
+          ctx.lineWidth = 0.5;
           ctx.strokeRect(x, y, squareSize, squareSize);
         }
       }
@@ -130,7 +133,7 @@ export default function Squares({
       canvas.removeEventListener("mouseleave", handleMouseLeave);
       cancelAnimationFrame(animationFrameId);
     };
-  }, [squareSize, gridGap, borderColor, hoverFillColor, speed, hoveredSquare]);
+  }, [squareSize, gridGap, resolvedBorderColor, hoverFillColor, speed, hoveredSquare]);
 
   return (
     <canvas
