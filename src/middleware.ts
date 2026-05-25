@@ -6,12 +6,14 @@ async function getSha256(message: string): Promise<string> {
   const msgBuffer = new TextEncoder().encode(message);
   const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
   const hashArray = Array.from(new Uint8Array(hashBuffer));
-  const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+  const hashHex = hashArray
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
   return hashHex;
 }
 
 // 遵循 Next.js 16 约定的 proxy 函数
-export async function proxy(request: NextRequest) {
+export async function middleware(request: NextRequest) {
   const sitePassword = process.env.SITE_PASSWORD;
 
   // 如果没有设置密码，说明无需验证，直接放行
@@ -31,7 +33,7 @@ export async function proxy(request: NextRequest) {
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
       return new NextResponse(
         JSON.stringify({ success: false, message: '未授权的 API 访问' }),
-        { status: 401, headers: { 'Content-Type': 'application/json' } }
+        { status: 401, headers: { 'Content-Type': 'application/json' } },
       );
     }
 
@@ -40,8 +42,11 @@ export async function proxy(request: NextRequest) {
 
     if (token !== expectedToken) {
       return new NextResponse(
-        JSON.stringify({ success: false, message: '未授权的 API 访问：Token 错误' }),
-        { status: 401, headers: { 'Content-Type': 'application/json' } }
+        JSON.stringify({
+          success: false,
+          message: '未授权的 API 访问：Token 错误',
+        }),
+        { status: 401, headers: { 'Content-Type': 'application/json' } },
       );
     }
   }
