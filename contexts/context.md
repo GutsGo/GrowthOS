@@ -54,6 +54,21 @@
 
 - **字体系统**：DM Sans (加载自 Google Fonts)，代码字体使用 JetBrains Mono。
 
+### 4. 交互动效系统 (ReactBits 集成)
+为延续极客、黑客暗黑的设计张力，项目在本地实现了 ReactBits 动效规范，支持以下高质感交互组件。后续新增页面或功能卡片时，应优先考虑引入它们以维持视觉一致性：
+- **`SpotlightCard` (跟随聚光灯卡片)**：
+  - **组件路径**：`src/components/reactbits/SpotlightCard.tsx`
+  - **场景**：仪表盘习惯打卡、WOOP 卡片、反思面板、专注区工具框等。
+  - **规范**：可传 `spotlightColor`，普通习惯用绿色微光 `rgba(29, 185, 84, 0.12)`，AI 社交与教练模块采用蓝色微光 `rgba(59, 130, 246, 0.15)`。
+- **`DecryptedText` (黑客字符解码文本)**：
+  - **组件路径**：`src/components/reactbits/DecryptedText.tsx`
+  - **场景**：AI 诊断标题、加载/反思引导、计时完成提示等需要彰显极客感的短文本。
+  - **规范**：用于中短句标题或强调说明，避免用在大段正文中以免视觉疲劳。
+- **`Squares` (Canvas 网格像素背景)**：
+  - **组件路径**：`src/components/reactbits/Squares.tsx`
+  - **场景**：沉浸式专注区、AI 教练聊天面板底层等容器级背景。
+  - **规范**：网格线和跳动块需维持极微弱的透明度（10% ~ 15% 之间），确保作为背景不喧宾夺主。
+
 ## 四、 核心功能矩阵与路线图
 
 详细的核心功能矩阵、开发路线图以及技术选型决策，请参考独立文档 [roadmap.md](file:///Users/alien/Documents/codes/GrowthOS/contexts/roadmap.md)。
