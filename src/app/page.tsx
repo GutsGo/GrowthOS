@@ -1,16 +1,18 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
+import dynamic from 'next/dynamic';
 import { useAppStore, AppTab } from '@/lib/store';
 import { db } from '@/lib/db';
 import CommandPalette from '@/components/CommandPalette';
-import DashboardView from '@/components/DashboardView';
-import FlowView from '@/components/FlowView';
-import BrainView from '@/components/BrainView';
-import CoachView from '@/components/CoachView';
-import StatsView from '@/components/StatsView';
-import SettingsView from '@/components/SettingsView';
-import GateScreen from '@/components/GateScreen';
+
+const DashboardView = dynamic(() => import('@/components/DashboardView'));
+const FlowView = dynamic(() => import('@/components/FlowView'));
+const BrainView = dynamic(() => import('@/components/BrainView'));
+const CoachView = dynamic(() => import('@/components/CoachView'));
+const StatsView = dynamic(() => import('@/components/StatsView'));
+const SettingsView = dynamic(() => import('@/components/SettingsView'));
+const GateScreen = dynamic(() => import('@/components/GateScreen'));
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Flame,
