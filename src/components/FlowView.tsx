@@ -2,9 +2,59 @@
 
 import React, { useState, useEffect, useRef, useMemo } from "react";
 import { useAppStore } from "@/lib/store";
-import { db, Card } from "@/lib/db";
+import { db, Card, trackDeletion } from "@/lib/db";
 import { useLiveQuery } from "dexie-react-hooks";
 import { motion, AnimatePresence } from "framer-motion";
+
+// ==========================================
+// 辅助函数：睡前回忆文本处理与 LCS 相似度比对
+// ==========================================
+const stripHtml = (html: string) => {
+  if (typeof window !== "undefined") {
+    const tmp = document.createElement("DIV");
+    tmp.innerHTML = html;
+    return tmp.textContent || tmp.innerText || "";
+  }
+  return html.replace(/<\/?[^>]+(>|$)/g, "");
+};
+
+const calculateLCS = (text1: string, text2: string) => {
+  const s1 = text1.trim().replace(/[\s\p{P}]+/gu, "").toLowerCase();
+  const s2 = text2.trim().replace(/[\s\p{P}]+/gu, "").toLowerCase();
+  if (!s1 || !s2) return 0;
+
+  const m = s1.length;
+  const n = s2.length;
+  const dp = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
+
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      if (s1[i - 1] === s2[j - 1]) {
+        dp[i][j] = dp[i - 1][j - 1] + 1;
+      } else {
+        dp[i][j] = Math.max(dp[i - 1][j], dp[i][j - 1]);
+      }
+    }
+  }
+
+  const lcsLen = dp[m][n];
+  const similarity = (lcsLen / Math.max(s1.length, s2.length)) * 100;
+  return Math.round(similarity);
+};
+
+const highlightMatchedText = (userText: string, correctText: string) => {
+  if (!userText) return "";
+  const correctClean = correctText.toLowerCase();
+  const chars = Array.from(userText);
+  return chars.map((char) => {
+    const cleanC = char.trim().toLowerCase();
+    if (!cleanC || /[\s\p{P}]/u.test(cleanC)) return char;
+    if (correctClean.includes(cleanC)) {
+      return `<span class="text-primary font-bold">${char}</span>`;
+    }
+    return char;
+  }).join("");
+};
 import {
   Zap,
   ArrowLeft,
@@ -18,6 +68,9 @@ import {
   HelpCircle,
   Clock,
   ExternalLink,
+  Trash2,
+  Plus,
+  FileText,
 } from "lucide-react";
 import SpotlightCard from "./reactbits/SpotlightCard";
 import Squares from "./reactbits/Squares";
@@ -198,6 +251,64 @@ export default function FlowView() {
     grade: string;
   } | null>(null);
 
+  // 追踪当前载入的历史费曼记录ID，用以保存更新或新增
+  const [currentFeynmanId, setCurrentFeynmanId] = useState<string | null>(null);
+
+  // 实时查询本地 IndexedDB 中的历史费曼记录
+  const feynmanRecords = useLiveQuery(async () => {
+    return await db.feynmanRecords.orderBy("createdAt").reverse().toArray();
+  }) || [];
+
+  // 保存记录至 IndexedDB
+  const saveFeynmanRecord = async (
+    topic: string,
+    content: string,
+    result: { score: number; grade: string; tips: string[] }
+  ) => {
+    const id = currentFeynmanId || (typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2, 15));
+    const record = {
+      id,
+      topic,
+      content,
+      score: result.score,
+      grade: result.grade,
+      tips: result.tips,
+      createdAt: new Date(),
+    };
+    await db.feynmanRecords.put(record);
+    setCurrentFeynmanId(id);
+  };
+
+  // 重置/新建费曼板
+  const handleNewFeynman = () => {
+    setCurrentFeynmanId(null);
+    setFeynmanTopic("");
+    setFeynmanContent("");
+    setFeynmanResult(null);
+  };
+
+  // 载入历史板书
+  const handleLoadFeynman = (record: any) => {
+    setCurrentFeynmanId(record.id);
+    setFeynmanTopic(record.topic);
+    setFeynmanContent(record.content);
+    setFeynmanResult({
+      score: record.score,
+      grade: record.grade,
+      tips: record.tips,
+    });
+  };
+
+  // 删除历史板书
+  const handleDeleteFeynman = async (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    await db.feynmanRecords.delete(id);
+    await trackDeletion("feynmanRecords", id);
+    if (currentFeynmanId === id) {
+      handleNewFeynman();
+    }
+  };
+
   const handleFeynmanAudit = async () => {
     if (!feynmanTopic || !feynmanContent) return;
     setIsFeynmanAnalysing(true);
@@ -215,17 +326,18 @@ export default function FlowView() {
       const data = await response.json();
 
       if (data.error === "NO_API_KEY") {
-        runLocalFeynmanSimulation(
+        await runLocalFeynmanSimulation(
           "⚠️ 未检测到 API 密钥，已自动为您降级为本地模拟分析。请在 .env.local 中配置密钥以使用真实大模型。",
         );
       } else if (data.error) {
         throw new Error(data.message || "请求失败");
       } else {
         setFeynmanResult(data);
+        await saveFeynmanRecord(feynmanTopic, feynmanContent, data);
       }
     } catch (error) {
       console.error("Feynman Audit Error:", error);
-      runLocalFeynmanSimulation(
+      await runLocalFeynmanSimulation(
         "⚠️ 真实 AI 评审接口连接失败，已自动降级为本地模拟分析。请检查网络与后台服务。",
       );
     } finally {
@@ -233,7 +345,7 @@ export default function FlowView() {
     }
   };
 
-  const runLocalFeynmanSimulation = (warningMsg: string) => {
+  const runLocalFeynmanSimulation = async (warningMsg: string) => {
     const wordCount = feynmanContent.length;
     let score = 70 + Math.min(Math.floor(wordCount / 10), 20);
     const suggestions = [
@@ -253,11 +365,14 @@ export default function FlowView() {
       );
     }
 
-    setFeynmanResult({
+    const result = {
       score: Math.min(score, 100),
       tips: suggestions,
       grade: score >= 90 ? "极易理解" : score >= 80 ? "基本易懂" : "较多术语",
-    });
+    };
+
+    setFeynmanResult(result);
+    await saveFeynmanRecord(feynmanTopic, feynmanContent, result);
   };
 
   // ==========================================
@@ -271,6 +386,94 @@ export default function FlowView() {
 
   const [currentCardIndex, setCurrentCardIndex] = useState(0);
   const [isFlipped, setIsFlipped] = useState(false);
+
+  // 主动回忆相关状态
+  const [isActiveRecall, setIsActiveRecall] = useState(false);
+  const [isRecallChecked, setIsRecallChecked] = useState(false);
+  const [userSpeechText, setUserSpeechText] = useState("");
+  const [isListening, setIsListening] = useState(false);
+  const [speechSupported, setSpeechSupported] = useState(true);
+  const [similarityScore, setSimilarityScore] = useState<number | null>(null);
+  const recognitionRef = useRef<any>(null);
+
+  // 初始化 SpeechRecognition 录音引擎
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const SpeechRecognition =
+        (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+      if (!SpeechRecognition) {
+        setSpeechSupported(false);
+      } else {
+        const rec = new SpeechRecognition();
+        rec.continuous = true;
+        rec.interimResults = true;
+        rec.lang = "zh-CN";
+
+        rec.onresult = (event: any) => {
+          let interimTranscript = "";
+          let finalTranscript = "";
+          for (let i = event.resultIndex; i < event.results.length; ++i) {
+            if (event.results[i].isFinal) {
+              finalTranscript += event.results[i][0].transcript;
+            } else {
+              interimTranscript += event.results[i][0].transcript;
+            }
+          }
+          setUserSpeechText((finalTranscript + interimTranscript).trim());
+        };
+
+        rec.onerror = (event: any) => {
+          console.error("Speech recognition error:", event.error);
+          setIsListening(false);
+        };
+
+        rec.onend = () => {
+          setIsListening(false);
+        };
+
+        recognitionRef.current = rec;
+      }
+    }
+  }, []);
+
+  // 切换录音状态
+  const toggleListening = () => {
+    if (!recognitionRef.current) return;
+    if (isListening) {
+      recognitionRef.current.stop();
+    } else {
+      setUserSpeechText("");
+      setIsListening(true);
+      try {
+        recognitionRef.current.start();
+      } catch (err) {
+        console.error("Failed to start speech recognition:", err);
+      }
+    }
+  };
+
+  // 核对答案
+  const handleVerifyRecall = (userText: string, correctHtml: string) => {
+    const cleanCorrect = stripHtml(correctHtml);
+    const score = calculateLCS(userText, cleanCorrect);
+    setSimilarityScore(score);
+    setIsRecallChecked(true);
+    if (isListening && recognitionRef.current) {
+      recognitionRef.current.stop();
+      setIsListening(false);
+    }
+  };
+
+  // 切换卡片或退出复习时重置回忆状态
+  useEffect(() => {
+    setIsRecallChecked(false);
+    setUserSpeechText("");
+    setSimilarityScore(null);
+    if (isListening && recognitionRef.current) {
+      recognitionRef.current.stop();
+      setIsListening(false);
+    }
+  }, [currentCardIndex, isReviewMode]);
 
   const activeCard = useMemo(() => {
     if (reviewCards.length === 0) return null;
@@ -354,15 +557,33 @@ export default function FlowView() {
           // 卡片复习专注模式视图 (SM-2 flashcards)
           // ==========================================
           <div className="w-full max-w-[560px] flex flex-col items-center justify-center min-h-[70vh] gap-6">
-            <div className="text-center">
+            <div className="text-center flex flex-col items-center gap-2">
               <span className="text-xs font-mono uppercase tracking-widest text-ai-blue font-bold">
                 SM-2 间隔重复记忆
               </span>
-              <h2 className="text-xl font-bold mt-1">
+              <h2 className="text-xl font-bold">
                 {reviewCards.length === 0
                   ? "全部搞定 🎉"
                   : `复习队列中 [${currentCardIndex + 1}/${reviewCards.length}]`}
               </h2>
+              {reviewCards.length > 0 && (
+                <div className="flex items-center gap-2 mt-1 px-3 py-1 bg-surface-1 border border-border-subtle rounded-full text-[11px] select-none">
+                  <span className="text-text-secondary font-medium">🧠 主动回忆模式</span>
+                  <button
+                    type="button"
+                    onClick={() => setIsActiveRecall(!isActiveRecall)}
+                    className={`w-8 h-4 rounded-full transition-colors relative ${
+                      isActiveRecall ? "bg-primary" : "bg-surface-3"
+                    }`}
+                  >
+                    <div
+                      className={`w-3.5 h-3.5 rounded-full bg-white absolute top-[1px] transition-all ${
+                        isActiveRecall ? "left-[13px]" : "left-[1px]"
+                      }`}
+                    />
+                  </button>
+                </div>
+              )}
             </div>
 
             {reviewCards.length === 0 ? (
@@ -425,18 +646,114 @@ export default function FlowView() {
                       <SpotlightCard
                         spotlightColor="rgba(59, 130, 246, 0.2)"
                         style={{ transform: "rotateY(180deg)" }}
-                        className="absolute inset-0 backface-hidden rounded-2xl p-6 flex flex-col justify-between shadow-xl"
+                        className="absolute inset-0 backface-hidden rounded-2xl p-5 flex flex-col justify-between shadow-xl"
                       >
-                        <span className="text-[10px] font-mono tracking-widest text-ai-blue font-bold uppercase">
-                          BACK · 核心解答
-                        </span>
-                        <div className="flex-1 flex items-center justify-center text-center overflow-y-auto py-2">
-                          <p className="text-sm text-text-primary leading-relaxed whitespace-pre-wrap px-4">
-                            {activeCard.back}
-                          </p>
+                        <div className="flex justify-between items-center flex-shrink-0">
+                          <span className="text-[10px] font-mono tracking-widest text-ai-blue font-bold uppercase">
+                            BACK · 核心解答
+                          </span>
+                          {isActiveRecall && isRecallChecked && similarityScore !== null && (
+                            <span className="text-[10px] font-mono font-bold text-primary bg-primary/10 px-1.5 py-0.5 rounded">
+                              🎯 回忆匹配度: {similarityScore}%
+                            </span>
+                          )}
                         </div>
-                        <span className="text-[10px] text-center text-text-secondary font-mono">
-                          点击卡片回到正面
+
+                        {isActiveRecall && !isRecallChecked ? (
+                          <div
+                            onClick={(e) => e.stopPropagation()}
+                            className="flex-1 flex flex-col justify-between py-2 gap-3 relative z-20"
+                          >
+                            <div className="absolute inset-0 backdrop-blur-md bg-background-void/40 rounded-xl pointer-events-none -mx-2 -my-1" />
+                            <div className="relative z-30 flex-1 flex flex-col justify-center gap-3">
+                              <div className="text-center space-y-1">
+                                <span className="text-xs font-bold text-text-primary block">🧠 睡前主动回忆模式</span>
+                                <span className="text-[10px] text-text-secondary">请通过语音或打字默写回忆卡片背面解答</span>
+                              </div>
+
+                              <div className="space-y-2">
+                                {speechSupported ? (
+                                  <div className="flex flex-col items-center gap-2">
+                                    <button
+                                      type="button"
+                                      onClick={toggleListening}
+                                      className={`w-12 h-12 rounded-full flex items-center justify-center border transition-all duration-300 relative ${
+                                        isListening
+                                          ? "bg-primary border-primary text-black shadow-[0_0_15px_rgba(29,185,84,0.5)] animate-pulse"
+                                          : "bg-surface-2 border-border-subtle text-text-secondary hover:text-text-primary hover:border-text-secondary"
+                                      }`}
+                                    >
+                                      <span className="text-lg">🎤</span>
+                                      {isListening && (
+                                        <div className="absolute inset-0 rounded-full border border-primary animate-ping opacity-60" />
+                                      )}
+                                    </button>
+                                    <span className="text-[9px] text-text-secondary font-mono">
+                                      {isListening ? "正在聆听中... 点击停止" : "点击麦克风开始说话"}
+                                    </span>
+                                  </div>
+                                ) : null}
+
+                                <textarea
+                                  value={userSpeechText}
+                                  onChange={(e) => setUserSpeechText(e.target.value)}
+                                  placeholder={speechSupported ? "语音识别内容将在此显示，或直接在此打字输入..." : "当前浏览器不支持语音识别，请打字输入你的回答..."}
+                                  className="w-full p-2.5 bg-surface-3 border border-border-subtle rounded-lg text-xs outline-none focus:border-primary resize-none font-sans text-text-primary placeholder:text-text-secondary/50"
+                                  rows={3}
+                                />
+                              </div>
+                            </div>
+
+                            <div className="relative z-30 flex gap-2">
+                              <button
+                                type="button"
+                                onClick={() => handleVerifyRecall(userSpeechText, activeCard.back)}
+                                className="flex-1 py-2 bg-primary hover:bg-primary-hover text-primary-text font-bold text-xs uppercase tracking-widest rounded-lg transition-colors active:scale-95"
+                              >
+                                核对答案
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setIsRecallChecked(true);
+                                  setSimilarityScore(0);
+                                }}
+                                className="px-3 py-2 bg-surface-3 hover:bg-surface-2 border border-border-subtle font-semibold text-xs rounded-lg transition-colors active:scale-95"
+                              >
+                                直接看
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="flex-1 flex flex-col justify-between overflow-y-auto py-2">
+                            <div className="flex-1 flex flex-col justify-center text-center px-4 overflow-y-auto">
+                              <div
+                                className="text-sm text-text-primary leading-relaxed prose prose-invert prose-sm max-w-none text-left"
+                                dangerouslySetInnerHTML={{ __html: activeCard.back }}
+                              />
+                            </div>
+                            
+                            {isActiveRecall && isRecallChecked && userSpeechText && (
+                              <div
+                                onClick={(e) => e.stopPropagation()}
+                                className="mt-3 p-3 bg-surface-2/60 border border-border-subtle rounded-xl text-left font-mono"
+                              >
+                                <span className="text-[9px] text-text-secondary uppercase tracking-widest font-bold block mb-1">
+                                  Your Recall Summary:
+                                </span>
+                                <div
+                                  className="text-[11px] text-text-primary leading-relaxed break-all max-h-[80px] overflow-y-auto"
+                                  dangerouslySetInnerHTML={{
+                                    __html: highlightMatchedText(userSpeechText, stripHtml(activeCard.back))
+                                  }}
+                                />
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        <span className="text-[10px] text-center text-text-secondary font-mono flex-shrink-0 mt-2">
+                          {isActiveRecall && !isRecallChecked ? "回答并核对后，可返回正面" : "点击卡片回到正面"}
                         </span>
                       </SpotlightCard>
                     </motion.div>
@@ -610,14 +927,25 @@ export default function FlowView() {
 
             {/* 右侧费曼看板区域 (占 3/5) */}
             <div className="md:col-span-3 space-y-6">
-              <div className="flex flex-col gap-2">
-                <h2 className="text-xl font-bold flex items-center gap-2">
-                  费曼输出板 (Feynman Board)
-                </h2>
-                <p className="text-xs text-text-secondary leading-relaxed">
-                  通过向零基础的小白解释一个事物来达成深入掌握。在此写下你的讲述大纲，让
-                  AI 评估你的语言易懂度。
-                </p>
+              <div className="flex justify-between items-start gap-4">
+                <div className="flex flex-col gap-2">
+                  <h2 className="text-xl font-bold flex items-center gap-2">
+                    费曼输出板 (Feynman Board)
+                  </h2>
+                  <p className="text-xs text-text-secondary leading-relaxed">
+                    通过向零基础的小白解释一个事物来达成深入掌握。在此写下你的讲述大纲，让
+                    AI 评估你的语言易懂度。
+                  </p>
+                </div>
+                {(feynmanTopic || feynmanContent || currentFeynmanId) && (
+                  <button
+                    onClick={handleNewFeynman}
+                    className="px-3 py-1.5 rounded-lg border border-border-subtle bg-surface-2 hover:bg-surface-3 hover:text-primary transition-all duration-200 text-xs font-semibold flex items-center gap-1.5 shrink-0"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>新建板书</span>
+                  </button>
+                )}
               </div>
 
               {/* 输入框 */}
@@ -663,7 +991,7 @@ export default function FlowView() {
                   }`}
                 >
                   {isFeynmanAnalysing ? (
-                    <>
+                     <>
                       <Sparkles className="w-3.5 h-3.5 animate-spin" />
                       <span>AI 判官深度分析中...</span>
                     </>
@@ -732,6 +1060,72 @@ export default function FlowView() {
                   </SpotlightCard>
                 )}
               </AnimatePresence>
+
+              {/* 历史板书记录 */}
+              <SpotlightCard
+                spotlightColor="rgba(29, 185, 84, 0.08)"
+                className="p-5 rounded-2xl flex flex-col gap-3"
+              >
+                <div className="flex items-center justify-between border-b border-border-subtle/50 pb-2">
+                  <span className="text-[10px] font-mono tracking-widest text-text-secondary uppercase flex items-center gap-1.5 font-bold">
+                    <FileText className="w-3.5 h-3.5 text-primary" />
+                    Feynman Archive · 历史板书 ({feynmanRecords.length})
+                  </span>
+                </div>
+                {feynmanRecords.length > 0 ? (
+                  <div className="max-h-[260px] overflow-y-auto space-y-2 pr-1 custom-scrollbar">
+                    {feynmanRecords.map((rec) => (
+                      <div
+                        key={rec.id}
+                        onClick={() => handleLoadFeynman(rec)}
+                        className={`p-3 rounded-lg border text-left transition-all duration-200 cursor-pointer flex items-center justify-between group ${
+                          currentFeynmanId === rec.id
+                            ? "bg-primary/5 border-primary/40"
+                            : "bg-surface-2 border-border-subtle hover:border-text-secondary"
+                        }`}
+                      >
+                        <div className="flex-1 min-w-0 pr-2">
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs font-bold text-text-primary truncate block">
+                              {rec.topic}
+                            </span>
+                            <span
+                              className={`text-[9px] font-mono font-bold px-1.5 py-0.25 rounded shrink-0 ${
+                                rec.score >= 85
+                                  ? "bg-primary/10 text-primary"
+                                  : "bg-amber-500/10 text-amber-500"
+                              }`}
+                            >
+                              {rec.score}分
+                            </span>
+                          </div>
+                          <span className="text-[10px] text-text-secondary mt-1 block">
+                            {new Date(rec.createdAt).toLocaleString("zh-CN", {
+                              month: "2-digit",
+                              day: "2-digit",
+                              hour: "2-digit",
+                              minute: "2-digit",
+                            })}
+                          </span>
+                        </div>
+                        <button
+                          onClick={(e) => handleDeleteFeynman(rec.id, e)}
+                          className="opacity-0 group-hover:opacity-100 p-1.5 rounded-md hover:bg-surface-3 hover:text-error transition-all shrink-0"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="py-6 text-center text-xs text-text-secondary/70 border border-dashed border-border-subtle/50 rounded-lg flex flex-col items-center justify-center gap-1.5">
+                    <span>暂无历史板书</span>
+                    <span className="text-[10px] text-text-secondary/50">
+                      解释某个概念并获得 AI 评审后，记录将自动在此归档。
+                    </span>
+                  </div>
+                )}
+              </SpotlightCard>
             </div>
           </div>
         )}
