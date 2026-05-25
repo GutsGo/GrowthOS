@@ -1,16 +1,17 @@
-"use client";
+'use client';
 
-import React, { useEffect, useState } from "react";
-import { useAppStore, AppTab } from "@/lib/store";
-import { db } from "@/lib/db";
-import CommandPalette from "@/components/CommandPalette";
-import DashboardView from "@/components/DashboardView";
-import FlowView from "@/components/FlowView";
-import BrainView from "@/components/BrainView";
-import CoachView from "@/components/CoachView";
-import StatsView from "@/components/StatsView";
-import SettingsView from "@/components/SettingsView";
-import { motion, AnimatePresence } from "framer-motion";
+import React, { useEffect, useState } from 'react';
+import { useAppStore, AppTab } from '@/lib/store';
+import { db } from '@/lib/db';
+import CommandPalette from '@/components/CommandPalette';
+import DashboardView from '@/components/DashboardView';
+import FlowView from '@/components/FlowView';
+import BrainView from '@/components/BrainView';
+import CoachView from '@/components/CoachView';
+import StatsView from '@/components/StatsView';
+import SettingsView from '@/components/SettingsView';
+import GateScreen from '@/components/GateScreen';
+import { motion, AnimatePresence } from 'framer-motion';
 import {
   Flame,
   Zap,
@@ -22,7 +23,38 @@ import {
   PlusCircle,
   Sun,
   Moon,
-} from "lucide-react";
+} from 'lucide-react';
+
+if (typeof window !== 'undefined' && !(window as any).__fetchIntercepted) {
+  (window as any).__fetchIntercepted = true;
+  const originalFetch = window.fetch;
+  window.fetch = async (input, init) => {
+    let url = '';
+    if (typeof input === 'string') {
+      url = input;
+    } else if (input instanceof URL) {
+      url = input.toString();
+    } else if (input && (input as any).url) {
+      url = (input as any).url;
+    }
+
+    if (
+      url.startsWith('/api/') &&
+      !url.includes('/api/auth/verify') &&
+      !url.includes('/api/uploadthing')
+    ) {
+      const token = sessionStorage.getItem('growthOS_auth_token');
+      if (token) {
+        const newInit = { ...init };
+        const headers = new Headers(newInit.headers || {});
+        headers.set('Authorization', `Bearer ${token}`);
+        newInit.headers = headers;
+        return originalFetch(input, newInit);
+      }
+    }
+    return originalFetch(input, init);
+  };
+}
 
 export default function Home() {
   const {
@@ -38,38 +70,84 @@ export default function Home() {
 
   const [isWoopModalOpen, setIsWoopModalOpen] = useState(false);
 
-  // 0. 初始化全局主题 (本地持久化)
+  // 0. 初始化全局主题 (本地持久化) — 必须在验证检查之前，防止白屏
   useEffect(() => {
-    const savedTheme = (localStorage.getItem("theme") as "light" | "dark") || "dark";
+    const savedTheme =
+      (localStorage.getItem('theme') as 'light' | 'dark') || 'dark';
     setTheme(savedTheme);
-    if (savedTheme === "dark") {
-      document.documentElement.classList.add("dark");
+    if (savedTheme === 'dark') {
+      document.documentElement.classList.add('dark');
     } else {
-      document.documentElement.classList.remove("dark");
+      document.documentElement.classList.remove('dark');
     }
   }, [setTheme]);
 
+  // 入口密码验证状态：null=加载中, true=已验证, false=未验证
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
+
+  // 检测是否已通过密码验证（sessionStorage 缓存 + 后端是否配置密码）
+  useEffect(() => {
+    const checkAuth = async () => {
+      // 先检查 sessionStorage 缓存
+      if (sessionStorage.getItem('growthOS_authenticated') === 'true') {
+        setIsAuthenticated(true);
+        return;
+      }
+      // 向后端发送空密码请求，判断是否配置了 SITE_PASSWORD
+      // 如果未配置密码，后端会直接返回 success: true
+      try {
+        const res = await fetch('/api/auth/verify', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password: '' }),
+        });
+        const data = await res.json();
+        if (res.ok && data.success) {
+          // 未配置密码，直接放行
+          sessionStorage.setItem('growthOS_authenticated', 'true');
+          if (data.token) {
+            sessionStorage.setItem('growthOS_auth_token', data.token);
+          }
+          setIsAuthenticated(true);
+        } else {
+          setIsAuthenticated(false);
+        }
+      } catch {
+        // 网络错误时也显示锁屏
+        setIsAuthenticated(false);
+      }
+    };
+    checkAuth();
+  }, []);
+
   // 0.1 注册 PWA ServiceWorker
   useEffect(() => {
-    if (typeof window !== "undefined" && "serviceWorker" in navigator && window.location.hostname !== "localhost") {
-      window.addEventListener("load", () => {
-        navigator.serviceWorker.register("/sw.js").then((reg) => {
-          console.log("PWA ServiceWorker 注册成功, scope: ", reg.scope);
-        }).catch((err) => {
-          console.warn("PWA ServiceWorker 注册失败: ", err);
-        });
+    if (
+      typeof window !== 'undefined' &&
+      'serviceWorker' in navigator &&
+      window.location.hostname !== 'localhost'
+    ) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker
+          .register('/sw.js')
+          .then((reg) => {
+            console.log('PWA ServiceWorker 注册成功, scope: ', reg.scope);
+          })
+          .catch((err) => {
+            console.warn('PWA ServiceWorker 注册失败: ', err);
+          });
       });
     }
   }, []);
 
   const toggleTheme = () => {
-    const nextTheme = theme === "dark" ? "light" : "dark";
+    const nextTheme = theme === 'dark' ? 'light' : 'dark';
     setTheme(nextTheme);
-    localStorage.setItem("theme", nextTheme);
-    if (nextTheme === "dark") {
-      document.documentElement.classList.add("dark");
+    localStorage.setItem('theme', nextTheme);
+    if (nextTheme === 'dark') {
+      document.documentElement.classList.add('dark');
     } else {
-      document.documentElement.classList.remove("dark");
+      document.documentElement.classList.remove('dark');
     }
   };
 
@@ -81,35 +159,35 @@ export default function Home() {
         if (habitCount === 0) {
           await db.habits.bulkAdd([
             {
-              id: "habit-1",
-              name: "AI 编码深度训练",
-              icon: "Code",
-              frequency: "daily",
-              energyDemand: "high",
+              id: 'habit-1',
+              name: 'AI 编码深度训练',
+              icon: 'Code',
+              frequency: 'daily',
+              energyDemand: 'high',
               createdAt: new Date(),
             },
             {
-              id: "habit-2",
-              name: "英语口语表达演练",
-              icon: "MessageSquare",
-              frequency: "daily",
-              energyDemand: "low",
+              id: 'habit-2',
+              name: '英语口语表达演练',
+              icon: 'MessageSquare',
+              frequency: 'daily',
+              energyDemand: 'low',
               createdAt: new Date(),
             },
             {
-              id: "habit-3",
-              name: "三分化力量拉伸",
-              icon: "Activity",
-              frequency: "daily",
-              energyDemand: "high",
+              id: 'habit-3',
+              name: '三分化力量拉伸',
+              icon: 'Activity',
+              frequency: 'daily',
+              energyDemand: 'high',
               createdAt: new Date(),
             },
             {
-              id: "habit-4",
-              name: "高情商社交话术练习",
-              icon: "User",
-              frequency: "daily",
-              energyDemand: "medium",
+              id: 'habit-4',
+              name: '高情商社交话术练习',
+              icon: 'User',
+              frequency: 'daily',
+              energyDemand: 'medium',
               createdAt: new Date(),
             },
           ]);
@@ -119,10 +197,10 @@ export default function Home() {
         if (cardCount === 0) {
           await db.cards.bulkAdd([
             {
-              id: "card-1",
-              front: "什么是 AI Agent 的 ReAct 模式？",
-              back: "ReAct (Reason + Action) 是一种大模型提示词工程和决策机制。LLM 交替进行‘推理’（思考现状、下一步计划）与‘行动’（调用外部工具 API 并获得 Observation），实现闭环的自主控制流。",
-              tags: ["AI", "Agent", "方法论"],
+              id: 'card-1',
+              front: '什么是 AI Agent 的 ReAct 模式？',
+              back: 'ReAct (Reason + Action) 是一种大模型提示词工程和决策机制。LLM 交替进行‘推理’（思考现状、下一步计划）与‘行动’（调用外部工具 API 并获得 Observation），实现闭环的自主控制流。',
+              tags: ['AI', 'Agent', '方法论'],
               reps: 0,
               interval: 0,
               ease: 2.5,
@@ -130,10 +208,10 @@ export default function Home() {
               createdAt: new Date(),
             },
             {
-              id: "card-2",
-              front: "费曼学习法的核心四步骤是什么？",
-              back: "1. 选择目标概念并系统性学习；\n2. 尝试将该概念以最通俗的语言向完全不懂的小白解释（降维输出）；\n3. 在卡壳、无法合理解释的地方重新查阅原资料（纠错与查漏补缺）；\n4. 简化并加入类比，建立直观的逻辑联系。",
-              tags: ["学习科学", "费曼"],
+              id: 'card-2',
+              front: '费曼学习法的核心四步骤是什么？',
+              back: '1. 选择目标概念并系统性学习；\n2. 尝试将该概念以最通俗的语言向完全不懂的小白解释（降维输出）；\n3. 在卡壳、无法合理解释的地方重新查阅原资料（纠错与查漏补缺）；\n4. 简化并加入类比，建立直观的逻辑联系。',
+              tags: ['学习科学', '费曼'],
               reps: 0,
               interval: 0,
               ease: 2.5,
@@ -143,7 +221,7 @@ export default function Home() {
           ]);
         }
       } catch (err) {
-        console.error("初始化 IndexedDB 数据失败: ", err);
+        console.error('初始化 IndexedDB 数据失败: ', err);
       }
     };
     initDatabase();
@@ -160,7 +238,7 @@ export default function Home() {
           }, 800); // 稍微延迟 800ms 弹出以防首屏渲染闪烁
         }
       } catch (err) {
-        console.error("检测今日 WOOP 意图失败:", err);
+        console.error('检测今日 WOOP 意图失败:', err);
       }
     };
     checkTodayWoop();
@@ -169,70 +247,102 @@ export default function Home() {
   // 2. 监听全局快捷键 Cmd+K
   useEffect(() => {
     const handleGlobalKeys = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === "k") {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
         e.preventDefault();
         toggleCommandPalette();
       }
     };
-    window.addEventListener("keydown", handleGlobalKeys);
-    return () => window.removeEventListener("keydown", handleGlobalKeys);
+    window.addEventListener('keydown', handleGlobalKeys);
+    return () => window.removeEventListener('keydown', handleGlobalKeys);
   }, [toggleCommandPalette]);
 
   // 渲染匹配的子页面 View
   const renderContentView = () => {
     switch (activeTab) {
-      case "dashboard":
+      case 'dashboard':
         return (
           <DashboardView
             isWoopModalOpen={isWoopModalOpen}
             setIsWoopModalOpen={setIsWoopModalOpen}
           />
         );
-      case "flow":
+      case 'flow':
         return <FlowView />;
-      case "brain":
+      case 'brain':
         return <BrainView />;
-      case "coach":
+      case 'coach':
         return <CoachView />;
-      case "stats":
+      case 'stats':
         return <StatsView />;
-      case "settings":
+      case 'settings':
         return <SettingsView />;
       default:
-        return <DashboardView isWoopModalOpen={isWoopModalOpen} setIsWoopModalOpen={setIsWoopModalOpen} />;
+        return (
+          <DashboardView
+            isWoopModalOpen={isWoopModalOpen}
+            setIsWoopModalOpen={setIsWoopModalOpen}
+          />
+        );
     }
   };
 
   const navLinks: { tab: AppTab; label: string; icon: React.ReactNode }[] = [
-    { tab: "dashboard", label: "今日指挥舱", icon: <Flame className="w-4 h-4" /> },
-    { tab: "flow", label: "专注与输出", icon: <Zap className="w-4 h-4" /> },
-    { tab: "brain", label: "第二大脑", icon: <BookOpen className="w-4 h-4" /> },
-    { tab: "coach", label: "AI 教练舱", icon: <Sparkles className="w-4 h-4" /> },
-    { tab: "stats", label: "数据与复盘", icon: <Layers className="w-4 h-4" /> },
-    { tab: "settings", label: "系统设置", icon: <Settings className="w-4 h-4" /> },
+    {
+      tab: 'dashboard',
+      label: '今日指挥舱',
+      icon: <Flame className="w-4 h-4" />,
+    },
+    { tab: 'flow', label: '专注与输出', icon: <Zap className="w-4 h-4" /> },
+    { tab: 'brain', label: '第二大脑', icon: <BookOpen className="w-4 h-4" /> },
+    {
+      tab: 'coach',
+      label: 'AI 教练舱',
+      icon: <Sparkles className="w-4 h-4" />,
+    },
+    { tab: 'stats', label: '数据与复盘', icon: <Layers className="w-4 h-4" /> },
+    {
+      tab: 'settings',
+      label: '系统设置',
+      icon: <Settings className="w-4 h-4" />,
+    },
   ];
 
   // 在 Flow Space 专注模式下隐藏侧边栏，提供沉浸感
-  const isFullScreenMode = activeTab === "flow";
+  const isFullScreenMode = activeTab === 'flow';
 
   const getTabTitle = (tab: AppTab) => {
     switch (tab) {
-      case "dashboard":
-        return "今日指挥舱";
-      case "flow":
-        return "专注与输出";
-      case "brain":
-        return "第二大脑";
-      case "coach":
-        return "AI 教练舱";
-      case "stats":
-        return "数据与复盘";
-      case "settings":
-        return "系统设置";
+      case 'dashboard':
+        return '今日指挥舱';
+      case 'flow':
+        return '专注与输出';
+      case 'brain':
+        return '第二大脑';
+      case 'coach':
+        return 'AI 教练舱';
+      case 'stats':
+        return '数据与复盘';
+      case 'settings':
+        return '系统设置';
       default:
-        return "GrowthOS";
+        return 'GrowthOS';
     }
   };
+
+  // 加载中：使用 inline style 确保深色背景，避免主题变量未就绪时白屏
+  if (isAuthenticated === null) {
+    return (
+      <div
+        className="h-screen w-screen"
+        style={{ backgroundColor: '#121212' }}
+      />
+    );
+  }
+
+  // 未验证：显示密码锁屏
+  if (!isAuthenticated) {
+    return <GateScreen onVerified={() => setIsAuthenticated(true)} />;
+  }
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-background-void text-text-primary">
@@ -261,7 +371,11 @@ export default function Home() {
               className="p-1.5 rounded-lg bg-surface-2 hover:bg-surface-3 border border-border-subtle text-text-secondary hover:text-text-primary transition-colors"
               aria-label="切换主题"
             >
-              {theme === "dark" ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+              {theme === 'dark' ? (
+                <Sun className="w-4 h-4" />
+              ) : (
+                <Moon className="w-4 h-4" />
+              )}
             </button>
           </div>
         </header>
@@ -290,11 +404,13 @@ export default function Home() {
                   onClick={() => setActiveTab(link.tab)}
                   className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-semibold transition-all duration-200 group relative ${
                     isActive
-                      ? "text-primary bg-surface-1"
-                      : "text-text-secondary hover:text-text-primary hover:bg-surface-1/55"
+                      ? 'text-primary bg-surface-1'
+                      : 'text-text-secondary hover:text-text-primary hover:bg-surface-1/55'
                   }`}
                 >
-                  <span className={`transition-transform duration-200 group-hover:scale-110 ${isActive ? "text-primary" : "text-text-secondary"}`}>
+                  <span
+                    className={`transition-transform duration-200 group-hover:scale-110 ${isActive ? 'text-primary' : 'text-text-secondary'}`}
+                  >
                     {link.icon}
                   </span>
                   <span>{link.label}</span>
@@ -325,8 +441,14 @@ export default function Home() {
               className="w-full flex items-center justify-between px-3 py-2 rounded-lg bg-surface-1 hover:bg-surface-2 border border-border-subtle text-xs text-text-secondary hover:text-text-primary transition-colors duration-150"
             >
               <div className="flex items-center gap-2">
-                {theme === "dark" ? <Sun className="w-3.5 h-3.5" /> : <Moon className="w-3.5 h-3.5" />}
-                <span>{theme === "dark" ? "浅色模式 (Light)" : "深色模式 (Dark)"}</span>
+                {theme === 'dark' ? (
+                  <Sun className="w-3.5 h-3.5" />
+                ) : (
+                  <Moon className="w-3.5 h-3.5" />
+                )}
+                <span>
+                  {theme === 'dark' ? '浅色模式 (Light)' : '深色模式 (Dark)'}
+                </span>
               </div>
             </button>
             <div className="text-[10px] text-center text-text-secondary py-1 font-mono">
@@ -339,7 +461,7 @@ export default function Home() {
       {/* 主视图区 (Main View) */}
       <main
         className={`flex-1 flex flex-col min-w-0 overflow-hidden relative bg-background-void transition-all duration-200 ${
-          !isFullScreenMode ? "pt-14 pb-16 md:pt-0 md:pb-0" : ""
+          !isFullScreenMode ? 'pt-14 pb-16 md:pt-0 md:pb-0' : ''
         }`}
       >
         <AnimatePresence mode="wait">
@@ -348,7 +470,7 @@ export default function Home() {
             initial={{ opacity: 0, x: 12 }}
             animate={{ opacity: 1, x: 0 }}
             exit={{ opacity: 0, x: -12 }}
-            transition={{ duration: 0.2, ease: "easeInOut" }}
+            transition={{ duration: 0.2, ease: 'easeInOut' }}
             className="flex-1 flex flex-col min-w-0 overflow-hidden h-full"
           >
             {renderContentView()}
@@ -366,14 +488,21 @@ export default function Home() {
                 key={link.tab}
                 onClick={() => setActiveTab(link.tab)}
                 className={`flex flex-col items-center justify-center flex-1 py-1 gap-1 transition-all duration-200 ${
-                  isActive ? "text-primary" : "text-text-secondary hover:text-text-primary"
+                  isActive
+                    ? 'text-primary'
+                    : 'text-text-secondary hover:text-text-primary'
                 }`}
               >
-                <span className={`transition-transform duration-200 ${isActive ? "scale-110 text-primary" : "text-text-secondary"}`}>
+                <span
+                  className={`transition-transform duration-200 ${isActive ? 'scale-110 text-primary' : 'text-text-secondary'}`}
+                >
                   {link.icon}
                 </span>
                 <span className="text-[9px] font-medium tracking-tight truncate max-w-[60px]">
-                  {link.label.replace("今日", "").replace("与输出", "").replace("AI ", "")}
+                  {link.label
+                    .replace('今日', '')
+                    .replace('与输出', '')
+                    .replace('AI ', '')}
                 </span>
               </button>
             );
