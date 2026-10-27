@@ -1,7 +1,8 @@
 "use client";
 
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useRef } from "react";
 import { Habit } from "@/lib/db";
+import { MOOD_LABELS, type HabitCustomData } from "@/lib/habit-data";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   X,
@@ -12,7 +13,6 @@ import {
   Dumbbell,
   Users,
   Check,
-  AlertCircle,
 } from "lucide-react";
 
 interface SetData {
@@ -25,7 +25,7 @@ interface SpecializedRecordModalProps {
   isOpen: boolean;
   onClose: () => void;
   habit: Habit | null;
-  onSave: (customData: any, imageUrl?: string) => void;
+  onSave: (customData: HabitCustomData, imageUrl?: string) => void;
 }
 
 export default function SpecializedRecordModal({
@@ -50,20 +50,14 @@ export default function SpecializedRecordModal({
   const [isUploading, setIsUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // 当 Modal 切换习惯时，重置所有表单状态
-  useEffect(() => {
-    if (isOpen && habit) {
-      setSets([{ setNum: 1, weight: 40, reps: 10 }]);
-      setFitnessMood("good");
-      setFitnessNotes("");
-      setSocialContact("");
-      setSocialTopic("");
-      setSocialReflect("");
-      setSocialFollowUp("");
-      setImagePreview(null);
-      setIsUploading(false);
-    }
-  }, [isOpen, habit]);
+  /*
+   * 这里原本有一个 useEffect：isOpen / habit 变化时把 9 个 state 重置回初始值。
+   *
+   * 那是「把 props 的变化同步进 state」，React 明确不建议这么写——
+   * 每次打开都要多渲染一轮，而且 9 个字段只要漏写一个就是「上次的输入
+   * 粘到了这次」。改成由 HabitGrid 传 key（见那边的注释），
+   * 习惯一换组件直接重挂载，所有 state 天然回到初始值，不可能漏。
+   */
 
   if (!isOpen || !habit) return null;
 
@@ -106,7 +100,7 @@ export default function SpecializedRecordModal({
 
     // 限制 4MB
     if (file.size > 4 * 1024 * 1024) {
-      alert("上传凭证图片不能超过 4MB 哦！");
+      alert("图片不能超过 4MB");
       return;
     }
 
@@ -147,7 +141,7 @@ export default function SpecializedRecordModal({
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     
-    let customData: any = {};
+    let customData: HabitCustomData = {};
     if (isFitness) {
       customData = {
         sets,
@@ -180,7 +174,7 @@ export default function SpecializedRecordModal({
           animate={{ scale: 1, opacity: 1, y: 0 }}
           exit={{ scale: 0.95, opacity: 0, y: 15 }}
           transition={{ type: "spring", duration: 0.4 }}
-          className="bg-surface-1 border border-border-subtle rounded-2xl w-full max-w-[480px] p-5 shadow-2xl relative z-10 overflow-hidden flex flex-col max-h-[85vh]"
+          className="bg-surface-1 border border-border-subtle rounded-xl w-full max-w-[480px] p-5 shadow-2xl relative z-10 overflow-hidden flex flex-col max-h-[85vh]"
         >
           {/* 装饰背景流光 */}
           <div className={`absolute -right-12 -top-12 w-28 h-28 rounded-full blur-3xl opacity-20 pointer-events-none ${
@@ -223,14 +217,14 @@ export default function SpecializedRecordModal({
                 <div className="space-y-2">
                   <div className="flex justify-between items-center">
                     <span className="text-[10px] uppercase font-bold tracking-widest text-text-secondary font-mono">
-                      训练组数 (Sets)
+                      组数
                     </span>
                     <button
                       type="button"
                       onClick={handleAddSet}
                       className="text-[10px] font-bold text-primary hover:underline flex items-center gap-1 font-mono uppercase"
                     >
-                      <Plus className="w-3 h-3" /> 添加一组 (Add Set)
+                      <Plus className="w-3 h-3" /> 添加一组
                     </button>
                   </div>
 
@@ -284,24 +278,22 @@ export default function SpecializedRecordModal({
                     训练精神状态
                   </label>
                   <div className="grid grid-cols-3 gap-2">
-                    {[
-                      { val: "great", label: "🔥 状态充沛" },
-                      { val: "good", label: "👍 表现平稳" },
-                      { val: "tired", label: "💤 略显疲惫" },
-                    ].map((mood) => {
-                      const isSelected = fitnessMood === mood.val;
+                    {(
+                      ["great", "good", "tired"] as NonNullable<HabitCustomData["mood"]>[]
+                    ).map((mood) => {
+                      const isSelected = fitnessMood === mood;
                       return (
                         <button
-                          key={mood.val}
+                          key={mood}
                           type="button"
-                          onClick={() => setFitnessMood(mood.val as any)}
+                          onClick={() => setFitnessMood(mood)}
                           className={`py-2 rounded-lg border text-xs font-bold font-mono transition-all ${
                             isSelected
                               ? "border-primary bg-primary/10 text-primary shadow-[0_0_8px_rgba(29,185,84,0.15)]"
                               : "border-border-subtle bg-surface-2/40 text-text-secondary hover:border-text-secondary"
                           }`}
                         >
-                          {mood.label}
+                          {MOOD_LABELS[mood]}
                         </button>
                       );
                     })}
@@ -311,13 +303,13 @@ export default function SpecializedRecordModal({
                 {/* 训练笔记 */}
                 <div className="space-y-1.5">
                   <label className="text-[10px] uppercase font-bold tracking-widest text-text-secondary font-mono">
-                    今日训练简记 (Notes)
+                    训练简记
                   </label>
                   <textarea
                     rows={2}
                     value={fitnessNotes}
                     onChange={(e) => setFitnessNotes(e.target.value)}
-                    placeholder="选填。记录突破瓶颈的心得或动作不标准的反思..."
+                    placeholder="选填。心得或不标准的动作"
                     className="w-full px-3 py-2 bg-surface-2/40 rounded-lg border border-border-subtle focus:border-primary text-xs text-text-primary outline-none resize-none font-mono"
                   />
                 </div>
@@ -330,14 +322,14 @@ export default function SpecializedRecordModal({
                 {/* 谈话对象 */}
                 <div className="space-y-1.5">
                   <label className="text-[10px] uppercase font-bold tracking-widest text-text-secondary font-mono">
-                    深度谈话/交往对象
+                    谈话对象
                   </label>
                   <input
                     type="text"
                     required
                     value={socialContact}
                     onChange={(e) => setSocialContact(e.target.value)}
-                    placeholder="谈话人姓名、职业或人际标签 (如: 导师、核心合伙人)"
+                    placeholder="姓名、职业，如：导师、合伙人"
                     className="w-full px-3 py-2 bg-surface-2/40 rounded-lg border border-border-subtle focus:border-ai-blue text-xs text-text-primary outline-none font-mono"
                   />
                 </div>
@@ -345,14 +337,14 @@ export default function SpecializedRecordModal({
                 {/* 探讨核心 */}
                 <div className="space-y-1.5">
                   <label className="text-[10px] uppercase font-bold tracking-widest text-text-secondary font-mono">
-                    交流核心主题 (Topic)
+                    主题
                   </label>
                   <textarea
                     rows={2}
                     required
                     value={socialTopic}
                     onChange={(e) => setSocialTopic(e.target.value)}
-                    placeholder="具体聊了什么？记录关键信息与对方的底层关切..."
+                    placeholder="聊了什么，对方的关切"
                     className="w-full px-3 py-2 bg-surface-2/40 rounded-lg border border-border-subtle focus:border-ai-blue text-xs text-text-primary outline-none resize-none font-mono"
                   />
                 </div>
@@ -360,14 +352,14 @@ export default function SpecializedRecordModal({
                 {/* 情商边界反思 */}
                 <div className="space-y-1.5">
                   <label className="text-[10px] uppercase font-bold tracking-widest text-text-secondary font-mono">
-                    沟通博弈反思 (EQ & Boundary)
+                    沟通反思
                   </label>
                   <textarea
                     rows={2}
                     required
                     value={socialReflect}
                     onChange={(e) => setSocialReflect(e.target.value)}
-                    placeholder="我有没有说废话/多嘴？有没有建立好的倾听边界？有无情绪内耗？"
+                    placeholder="说多了吗？倾听边界如何？有无内耗？"
                     className="w-full px-3 py-2 bg-surface-2/40 rounded-lg border border-border-subtle focus:border-ai-blue text-xs text-text-primary outline-none resize-none font-mono"
                   />
                 </div>
@@ -375,14 +367,14 @@ export default function SpecializedRecordModal({
                 {/* 后续跟进待办 */}
                 <div className="space-y-1.5">
                   <label className="text-[10px] uppercase font-bold tracking-widest text-text-secondary font-mono">
-                    后续价值维系动作 (Follow-up)
+                    后续动作
                   </label>
                   <input
                     type="text"
                     required
                     value={socialFollowUp}
                     onChange={(e) => setSocialFollowUp(e.target.value)}
-                    placeholder="需要明天发个跟进邮件？或者2周后约个下午茶？具体行动..."
+                    placeholder="如：明天发邮件、两周后约见"
                     className="w-full px-3 py-2 bg-surface-2/40 rounded-lg border border-border-subtle focus:border-ai-blue text-xs text-text-primary outline-none font-mono"
                   />
                 </div>
@@ -394,7 +386,7 @@ export default function SpecializedRecordModal({
             // ========================================== */}
             <div className="space-y-2 pt-2 border-t border-border-subtle/50">
               <span className="text-[10px] uppercase font-bold tracking-widest text-text-secondary font-mono flex items-center justify-between">
-                <span>打卡图片凭证 (Optional - 可选)</span>
+                <span>图片凭证</span>
                 {imagePreview && (
                   <button
                     type="button"
@@ -408,6 +400,10 @@ export default function SpecializedRecordModal({
 
               {imagePreview ? (
                 <div className="relative rounded-xl overflow-hidden border border-border-subtle h-[120px] bg-surface-2 group">
+                  {/* 这里是用户刚选图片的 base64 预览，没有任何网络请求，
+                      也没有「按尺寸裁剪」的余地（尺寸要等读文件才知道）。
+                      next/image 对 data URL 只能 unoptimized 透传，换过去只多一层包装。 */}
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
                     src={imagePreview}
                     alt="Upload Preview"
@@ -436,10 +432,10 @@ export default function SpecializedRecordModal({
                     )}
                   </div>
                   <span className="text-[10px] font-bold text-text-primary group-hover:text-primary transition-colors">
-                    {isUploading ? "正在处理图片..." : "点击选择打卡图片"}
+                    {isUploading ? "处理中…" : "选择图片"}
                   </span>
                   <span className="text-[9px] text-neutral-gray">
-                    支持拖入图片，最大 4MB。离线模式将自动压缩并双轨降级存储。
+                    可拖入图片，最大 4MB
                   </span>
                 </div>
               )}

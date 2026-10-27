@@ -56,7 +56,7 @@ export default function GateScreen({ onVerified }: GateScreenProps) {
         inputRef.current?.focus();
       }
     } catch {
-      setError("网络连接失败，请重试");
+      setError("网络连接失败");
     } finally {
       setIsLoading(false);
     }
@@ -102,7 +102,7 @@ export default function GateScreen({ onVerified }: GateScreenProps) {
         transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
         className="relative w-full max-w-sm mx-4"
       >
-        <div className="relative bg-surface-1 border border-border-subtle rounded-2xl p-8 backdrop-blur-xl shadow-level-3">
+        <div className="relative bg-surface-1 border border-border-subtle rounded-xl p-8 backdrop-blur-xl shadow-level-3">
           {/* 顶部图标 */}
           <motion.div
             className="flex justify-center mb-6"
@@ -117,14 +117,14 @@ export default function GateScreen({ onVerified }: GateScreenProps) {
                     key="unlocked"
                     initial={{ scale: 0, rotate: -180 }}
                     animate={{ scale: 1, rotate: 0 }}
-                    className="w-16 h-16 rounded-2xl bg-primary/15 flex items-center justify-center border border-primary/20"
+                    className="w-16 h-16 rounded-xl bg-primary/15 flex items-center justify-center border border-primary/20"
                   >
                     <Unlock className="w-7 h-7 text-primary" />
                   </motion.div>
                 ) : (
                   <motion.div
                     key="locked"
-                    className="w-16 h-16 rounded-2xl bg-surface-2 flex items-center justify-center border border-border-subtle"
+                    className="w-16 h-16 rounded-xl bg-surface-2 flex items-center justify-center border border-border-subtle"
                   >
                     <Shield className="w-7 h-7 text-text-secondary" />
                   </motion.div>
@@ -157,7 +157,7 @@ export default function GateScreen({ onVerified }: GateScreenProps) {
                   setPassword(e.target.value);
                   if (error) setError("");
                 }}
-                placeholder="输入访问密码"
+                placeholder="访问密码"
                 disabled={isSuccess}
                 className="w-full h-11 pl-10 pr-4 rounded-xl bg-surface-2 border border-border-subtle text-text-primary text-sm placeholder:text-muted-gray focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary/50 transition-all duration-200 disabled:opacity-50"
                 autoComplete="off"
