@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# 同一分支的新提交取消旧任务：测试跑 40 秒，没必要排队
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: 安装依赖
+        run: pnpm install --frozen-lockfile
+
+      # 四道闸门按「便宜的先跑」排序：类型 10s → lint 8s → 测试 1s → 构建 30s。
+      # 失败得越早，反馈越快。
+      - name: 类型检查
+        run: pnpm typecheck
+
+      - name: 代码规范
+        run: pnpm lint
+
+      # 这一步不只是「跑绿」：scripts/test-run.mjs 会同时检查
+      # 用例数下限、必测模块是否被执行、行覆盖率下限、以及「零用例」这种假绿情况。
+      - name: 测试
+        run: pnpm test
+
+      - name: 生产构建
+        run: pnpm build

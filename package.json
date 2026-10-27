@@ -6,7 +6,12 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test": "node scripts/test-run.mjs",
+    "test:fast": "node scripts/test-run.mjs --no-coverage",
+    "test:watch": "node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --import ./test/hooks.mjs --test --watch \"src/**/__tests__/*.test.ts\"",
+    "typecheck": "tsc --noEmit",
+    "check": "npm run typecheck && npm run lint && npm run test"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.106.1",
@@ -35,6 +40,7 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.2.6",
+    "fake-indexeddb": "^6.2.6",
     "tailwindcss": "^4",
     "typescript": "^5"
   }
