@@ -1,10 +1,43 @@
 import { NextResponse } from "next/server";
+import { chatJSON } from "@/lib/ai/provider";
+
+/**
+ * 特化打卡的表单数据。
+ *
+ * 两种形状（健身 / 社交）共用同一个字段，所以全部可选举。
+ * 改成具体形状而不是 `any`：这个值会被拼进 prompt，
+ * 字段名写错（比如 `moods`）原本会静默取到 undefined，
+ * 于是 AI 收到一句「状态：undefined」还照样输出问题。
+ */
+interface HabitCustomData {
+  /** 健身：训练组 */
+  sets?: { setNum?: number; weight?: number; reps?: number }[];
+  /** 健身：精神状态 */
+  mood?: string;
+  /** 健身：训练简记 */
+  notes?: string;
+  /** 社交：交往对象 */
+  contact?: string;
+  /** 社交：探讨主题 */
+  topic?: string;
+  /** 社交：沟通反思 */
+  reflect?: string;
+  /** 社交：后续跟进 */
+  followUp?: string;
+}
 
 interface HabitItem {
   name: string;
   logged: boolean;
-  customData?: any;
+  customData?: HabitCustomData;
   customFormType?: "none" | "fitness" | "social";
+}
+
+/** 「已打卡且带特化数据」的习惯。用类型谓词把收窄交给 filter，省掉一堆 if (!x) return。 */
+type LoggedHabit = HabitItem & { customData: HabitCustomData };
+
+function hasCustomData(h: HabitItem): h is LoggedHabit {
+  return h.logged && Boolean(h.customData);
 }
 
 interface AITaskItem {
@@ -35,29 +68,10 @@ export async function POST(req: Request) {
     const payload = await req.json() as ReviewPayload;
     const { date, woop, energy, habits, cardsCount, aiTasks = [] } = payload;
 
-    // 1. 获取 API 密钥配置
-    const deepseekKey = process.env.DEEPSEEK_API_KEY;
-    const deepseekBase = process.env.DEEPSEEK_API_BASE_URL || "https://api.deepseek.com/v1";
-    const deepseekModel = process.env.DEEPSEEK_MODEL || "deepseek-chat";
-
-    const openaiKey = process.env.OPENAI_API_KEY;
-    const openaiBase = process.env.OPENAI_API_BASE_URL || "https://api.openai.com/v1";
-    const openaiModel = process.env.OPENAI_MODEL || "gpt-4o-mini";
-
-    let apiKey = "";
-    let apiBase = "";
-    let model = "";
-
-    if (deepseekKey) {
-      apiKey = deepseekKey;
-      apiBase = deepseekBase;
-      model = deepseekModel;
-    } else if (openaiKey) {
-      apiKey = openaiKey;
-      apiBase = openaiBase;
-      model = openaiModel;
-    }
-
+    // 1. 密钥解析交给统一入口。
+    //    这里原来自己读 env 拼 provider，与 /api/exam 那三个新路由是两套逻辑：
+    //    没有 25s 超时、没有 json 模式失败重试、日志格式也不一样。
+    //    结果是「新功能配好了，老功能永远降级」，而日志里看不出来。
     // 2. 本地降级生成器 (融入健身、社交与 AI 任务，自适应高精准拷问)
     const fallbackGenerate = () => {
       const total = habits.length;
@@ -67,7 +81,9 @@ export async function POST(req: Request) {
       const obstacleStr = woop?.obstacle || "预设阻碍";
 
       // 提取特化数据
-      const fitness = habits.find((h) => h.customFormType === "fitness" && h.logged && h.customData);
+      const fitness = habits.find(
+        (h): h is LoggedHabit => h.customFormType === "fitness" && hasCustomData(h),
+      );
       const social = habits.find((h) => h.customFormType === "social" && h.logged && h.customData);
       
       // 提取 AI 任务数据
@@ -90,12 +106,16 @@ export async function POST(req: Request) {
       }
 
       // 问答二：针对健身或社交特化行为的反思
-      if (fitness && fitness.customData?.sets?.length > 0) {
+      const fitnessSets = fitness?.customData.sets ?? [];
+      if (fitness && fitnessSets.length > 0) {
         const data = fitness.customData;
-        const totalWeight = data.sets.reduce((acc: number, s: any) => acc + (s.weight || 0) * (s.reps || 0), 0);
+        const totalWeight = fitnessSets.reduce(
+          (acc: number, s) => acc + (s.weight || 0) * (s.reps || 0),
+          0,
+        );
         const moodText = data.mood === "great" ? "精力充沛" : data.mood === "tired" ? "略显疲惫" : "状态平稳";
         questions.push(
-          `你在【${fitness.name}】打卡中挑战了 ${data.sets.length} 组训练，总能耗折合 ${totalWeight}kg 搬运量（状态：${moodText}）。请诚实自省：在追求训练重量的同时，你的动作规范度是否在缩水？今日笔记【${data.notes || "无"}】有没有避重就轻？`
+          `你在【${fitness.name}】打卡中挑战了 ${fitnessSets.length} 组训练，总能耗折合 ${totalWeight}kg 搬运量（状态：${moodText}）。请诚实自省：在追求训练重量的同时，你的动作规范度是否在缩水？今日笔记【${data.notes || "无"}】有没有避重就轻？`
         );
       } else if (social && social.customData) {
         const data = social.customData;
@@ -129,12 +149,8 @@ export async function POST(req: Request) {
       return questions;
     };
 
-    if (!apiKey) {
-      return NextResponse.json({
-        questions: fallbackGenerate(),
-        isFallback: true,
-      });
-    }
+    // 没配 Key 时不必先判断再请求：chatJSON 会直接返回 failure: "no_key"，
+    // 走下面同一个降级分支。少一条路径就少一处「两边判断不一致」的可能。
 
     // 3. 构造 System Prompt
     const totalHabits = habits.length;
@@ -143,19 +159,23 @@ export async function POST(req: Request) {
     
     // 提炼特化习惯数据及 AI 任务数据用于 LLM 诊断
     const fitnessLogs = habits
-      .filter((h) => h.customFormType === "fitness" && h.logged && h.customData)
+      .filter((h): h is LoggedHabit => h.customFormType === "fitness" && hasCustomData(h))
       .map((h) => {
         const fd = h.customData;
-        const setsText = fd.sets?.map((s: any) => `第${s.setNum}组:${s.weight}kg x ${s.reps}次`).join("; ") || "无组数";
+        const setsText =
+        fd.sets
+          ?.map((s) => `第${s.setNum}组:${s.weight}kg x ${s.reps}次`)
+          .join("; ") || "无组数";
         return `习惯名:${h.name}, 训练组:${setsText}, 精神状态:${fd.mood}, 训练简记:${fd.notes || "无"}`;
       });
 
     const socialLogs = habits
-      .filter((h) => h.customFormType === "social" && h.logged && h.customData)
+      .filter((h): h is LoggedHabit => h.customFormType === "social" && hasCustomData(h))
       .map((h) => {
         const sd = h.customData;
-        return `习惯名:${h.name}, 交往对象:${sd.contact}, 探讨核心:${sd.topic}, 沟通博弈反思:${sd.reflect}, 后续待办跟进:${sd.followUp}`;
-      });
+        return `习惯名:${h.name}, 交往对象:${sd.contact ?? "无"}, 探讨核心:${sd.topic ?? "无"}, 沟通博弈反思:${sd.reflect ?? "无"}, 后续待办跟进:${sd.followUp ?? "无"}`;
+      })
+      .filter((line) => line.length > 0);
 
     const totalTasks = aiTasks.length;
     const completedTasks = aiTasks.filter((t) => t.isCompleted).length;
@@ -194,41 +214,21 @@ ${uncompletedTaskNames.length > 0 ? `- 未完成排程任务：${uncompletedTask
 4. 必须输出标准的 JSON，格式为: { "questions": [string, string, string] }。不要有任何其他字符。`;
 
     // 4. 发送 API 请求
-    const url = `${apiBase.replace(/\/$/, "")}/chat/completions`;
-    const response = await fetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model: model,
-        messages: [{ role: "system", content: systemPrompt }],
-        temperature: 0.3,
-        response_format: { type: "json_object" },
-      }),
+    const result = await chatJSON({
+      system: systemPrompt,
+      user: "按上面的格式输出今天的 3 个复盘问题。",
+      temperature: 0.3,
     });
 
-    if (!response.ok) {
-      console.warn("AI 晚间复盘请求失败，启用本地降级...");
+    if (!result.ok) {
       return NextResponse.json({ questions: fallbackGenerate(), isFallback: true });
     }
 
-    const data = await response.json();
-    const content = data.choices?.[0]?.message?.content;
-
-    if (!content) {
-      return NextResponse.json({ questions: fallbackGenerate(), isFallback: true });
-    }
-
-    try {
-      const result = JSON.parse(content.trim()) as { questions: string[] };
-      return NextResponse.json({ questions: result.questions || fallbackGenerate(), isFallback: false });
-    } catch (parseError) {
-      console.warn("AI 晚间复盘返回非合法 JSON，启用本地降级。内容为:", content);
-      return NextResponse.json({ questions: fallbackGenerate(), isFallback: true });
-    }
-  } catch (error: any) {
+    return NextResponse.json({
+      questions: pickQuestions(result.data, fallbackGenerate),
+      isFallback: false,
+    });
+  } catch (error: unknown) {
     console.error("AI 晚间复盘 API 报错:", error);
     return NextResponse.json({
       questions: [
@@ -239,4 +239,23 @@ ${uncompletedTaskNames.length > 0 ? `- 未完成排程任务：${uncompletedTask
       isFallback: true,
     });
   }
+}
+
+/**
+ * 从模型返回里挑出 3 个问题。
+ *
+ * 不够 3 个就整体退回本地问题，不做「有几个用几个」——
+ * 用户看到 2 个问题会以为「今天只值得问两个」，而这恰恰是复盘最需要 3 个的时候。
+ */
+function pickQuestions(data: unknown, fallback: () => string[]): string[] {
+  if (!data || typeof data !== "object") return fallback();
+  const raw = (data as { questions?: unknown }).questions;
+  if (!Array.isArray(raw)) return fallback();
+
+  const questions = raw
+    .filter((q): q is string => typeof q === "string")
+    .map((q) => q.trim())
+    .filter((q) => q.length > 0);
+
+  return questions.length >= 3 ? questions.slice(0, 3) : fallback();
 }

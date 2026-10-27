@@ -1,4 +1,7 @@
 import { NextResponse } from "next/server";
+import { chatJSON } from "@/lib/ai/provider";
+import type { AITaskDraft } from "@/lib/ai/contract";
+import { normalizeTaskDrafts } from "@/lib/ai/contract";
 
 interface GenerateTasksPayload {
   energy: number;
@@ -18,29 +21,9 @@ export async function POST(req: Request) {
     const payload = await req.json() as GenerateTasksPayload;
     const { energy, woopWish, woopPlan, historyStats } = payload;
 
-    // 1. 获取 API 密钥配置
-    const deepseekKey = process.env.DEEPSEEK_API_KEY;
-    const deepseekBase = process.env.DEEPSEEK_API_BASE_URL || "https://api.deepseek.com/v1";
-    const deepseekModel = process.env.DEEPSEEK_MODEL || "deepseek-chat";
-
-    const openaiKey = process.env.OPENAI_API_KEY;
-    const openaiBase = process.env.OPENAI_API_BASE_URL || "https://api.openai.com/v1";
-    const openaiModel = process.env.OPENAI_MODEL || "gpt-4o-mini";
-
-    let apiKey = "";
-    let apiBase = "";
-    let model = "";
-
-    if (deepseekKey) {
-      apiKey = deepseekKey;
-      apiBase = deepseekBase;
-      model = deepseekModel;
-    } else if (openaiKey) {
-      apiKey = openaiKey;
-      apiBase = openaiBase;
-      model = openaiModel;
-    }
-
+    // 1. 密钥解析与调用统一走 @/lib/ai/provider。
+    //    这里原来自己读 env、自己 fetch：没有超时、没有 json 模式失败重试。
+    //    表现是「新接口能通、这个永远降级」，而日志里只写一句「调用失败」。
     // 2. 本地智能降级生成器 (高度自适应)
     const fallbackGenerate = () => {
       const tasks = [];
@@ -115,12 +98,8 @@ export async function POST(req: Request) {
       return tasks;
     };
 
-    if (!apiKey) {
-      return NextResponse.json({
-        tasks: fallbackGenerate(),
-        isFallback: true,
-      });
-    }
+    // 没配 Key 时不必先判断再请求：chatJSON 会直接返回 failure: "no_key"，
+    // 走下面同一个降级分支。少一条路径就少一处「两边判断不一致」的可能。
 
     // 3. 构建大模型 Prompt
     const uncompletedStats = historyStats.filter((h) => h.rate < 0.6);
@@ -136,6 +115,7 @@ export async function POST(req: Request) {
 - 今日 If-Then 应对计划 (Plan): ${woopPlan || "无"}
 - 过去 7 天习惯表现：
 ${historyStats.length > 0 ? historyStats.map((h) => `- ${h.name} 打卡率: ${Math.round(h.rate * 100)}%`).join("\n") : "- 暂无历史习惯打卡记录"}
+${uncompletedReport ? `- 需要重点攻坚（打卡率低于 60%）：\n${uncompletedReport}` : ""}
 
 排程排班指导规则：
 1. **能量匹配**：今日能量极低 (<=4) 时，必须触发“习惯降级保护”，只保留 1-2 项低能量的保底任务（如拉伸、写一行代码），不要强推高负荷。今日能量极高 (>=7) 时，若发现有最近完成率低的重要习惯，必须严厉指正并为其排程一次“破局攻坚”任务。
@@ -153,47 +133,23 @@ ${historyStats.length > 0 ? historyStats.map((h) => `- ${h.name} 打卡率: ${Ma
 }`;
 
     // 4. 发送 API 请求
-    const url = `${apiBase.replace(/\/$/, "")}/chat/completions`;
-    const response = await fetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model: model,
-        messages: [{ role: "system", content: systemPrompt }],
-        temperature: 0.3,
-        response_format: { type: "json_object" },
-      }),
+    const result = await chatJSON({
+      system: systemPrompt,
+      user: "按上面的 JSON 格式输出今天的任务清单。",
+      temperature: 0.3,
     });
 
-    if (!response.ok) {
-      console.warn("AI 行动排程接口调用失败，启动本地降级...");
+    if (!result.ok) {
       return NextResponse.json({ tasks: fallbackGenerate(), isFallback: true });
     }
 
-    const data = await response.json();
-    const content = data.choices?.[0]?.message?.content;
-
-    if (!content) {
+    const tasks: AITaskDraft[] = normalizeTaskDrafts(result.data);
+    if (tasks.length === 0) {
+      // 模型返回了合法 JSON 但一个任务都没给，等同于失败
       return NextResponse.json({ tasks: fallbackGenerate(), isFallback: true });
     }
 
-    try {
-      const result = JSON.parse(content.trim()) as { tasks: any[] };
-      // 校验并补充 id 属性
-      const formattedTasks = (result.tasks || []).map((t: any) => ({
-        id: t.id || `task-${Math.random().toString(36).substring(7)}`,
-        name: t.name || "AI 规划任务",
-        reason: t.reason || "AI 教练的排程推荐",
-        energyDemand: ["high", "medium", "low"].includes(t.energyDemand) ? t.energyDemand : "medium",
-      }));
-      return NextResponse.json({ tasks: formattedTasks, isFallback: false });
-    } catch (err) {
-      console.warn("AI 每日行动排程解析 JSON 失败，启用本地降级。内容为:", content);
-      return NextResponse.json({ tasks: fallbackGenerate(), isFallback: true });
-    }
+    return NextResponse.json({ tasks, isFallback: false });
   } catch (error) {
     console.error("AI 每日行动排程 API 异常:", error);
     return NextResponse.json({
