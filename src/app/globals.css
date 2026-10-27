@@ -2,10 +2,15 @@
 @import "@xyflow/react/dist/style.css";
 
 :root {
-  --color-primary: #16a34a; /* 亮色下选用更深且健康的森林绿以保证阅读对比度 */
-  --color-primary-hover: #15803d;
-  --color-primary-text: #ffffff; /* 亮色下森林绿背景配白色文字 */
-  --color-ai-blue: #3b82f6;
+  /* 亮色的主色比深色更深一档：#16a34a 配白字只有 2.96:1，
+     12px 的按钮文字会糊成一片；#15803d 配白字是 5.2:1。
+     「主色上的字色」因此可以永远等于 --color-primary-text（亮=白、暗=黑），
+     不用每个组件自己猜该写 text-white 还是 text-black。 */
+  --color-primary: #15803d;
+  --color-primary-hover: #166534;
+  --color-primary-text: #ffffff;
+  --color-ai-blue: #2563eb;
+  --color-ai-blue-text: #ffffff;
   
   /* 浅色主题 (Light Mode) 变量 */
   --color-background-void: #FAFAFA;
@@ -22,14 +27,91 @@
   --color-warning: #f59b23;
   --color-error: #e22134;
 
+  /* ---- 四档语义色（Phase 4 视觉收口）----
+     红 / 橙 / 绿 / 青。四个档位在灰度下靠位置也能区分，
+     所以颜色是**辅助**，不是唯一线索——色盲用户不会因此点错档。
+     亮色主题下取更深的色值，因为在白底上 #1DB954 的对比度不足。 */
+  --rating-forgot: #d92b3a;
+  --rating-hard: #d97706;
+  --rating-good: #16a34a;
+  --rating-easy: #0284c7;
+
+  /* ---- 卡片规格（Phase 4）---- */
+  --shadow-card-raw: 0 1px 2px rgba(0, 0, 0, 0.05);
+
   --shadow-level-3: 0 4px 20px rgba(0, 0, 0, 0.08);
+
+  /* ---- 版式（2026-10-27 视觉统一）----
+     之前六个页面各自写死了 max-w-[720px] / [560px] / [1000px] / 无上限，
+     于是同一个「页面」在 1384 宽的窗口里从 560 到 1384 都有。
+     现在只有一个宽度：840。复习原来是「专注页 560」，但它同样是单栏
+     文档，换个页签正文就窄了 280px，读起来像两个产品——一起收进 840。
+     制卡是三栏工作台（左列表 / 中表单 / 右图谱），它的宽度由三栏
+     各自决定，不受这条上限约束。 */
+  --page-max: 840px;
+  --page-pad-x: 20px;
+  --page-pad-y: 28px;
+
+  /* 圆角：卡片 12（@theme 的 --radius-card）/ 按钮 10 / 控件 8。
+     三档，不再出现 4/6/12/16 混用 */
+  --radius-btn: 10px;
+  --radius-field: 8px;
 }
+
+@media (min-width: 768px) {
+  :root {
+    --page-pad-x: 32px;
+    --page-pad-y: 36px;
+  }
+}
+
+/* ---- 滚动条（全站统一）----
+   两个目的：
+   1) 轨道永远占位（配合 .page-scroll 的 overflow-y: scroll），切页不跳；
+   2) 没内容可滚的时候不能露出一根灰色空槽——轨道和四角都做透明，
+      只有能滚的时候才露出细滑块。
+   scrollbar-color / ::-webkit-scrollbar 两套都写：新版 Chromium 与
+   Firefox 走前者，老引擎走后者，两边观感一致。 */
+:root {
+  --scrollbar-w: 12px;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-border-subtle) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: var(--scrollbar-w);
+  height: var(--scrollbar-w);
+}
+
+*::-webkit-scrollbar-track,
+*::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background-color: var(--color-border-subtle);
+  background-clip: content-box;
+  border: 3px solid transparent;
+  border-radius: 999px;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background-color: var(--color-muted-gray);
+}
+
 
 .dark {
   /* 深色主题 (Dark Mode) 变量 */
   --color-primary: #1DB954;
   --color-primary-hover: #1ED760;
   --color-primary-text: #000000; /* 深色下 Spotify 绿背景配黑色文字 */
+  /* AI 蓝也遵循同一条规则：亮色=深底白字，暗色=亮底黑字。
+     任何「有底色」的按钮都只从 --color-*-text 取字色，不写死 text-white。 */
+  --color-ai-blue: #3b82f6;
+  --color-ai-blue-text: #000000;
   --color-background-void: #121212;
   --color-surface-1: #181818;
   --color-surface-2: #282828;
@@ -39,7 +121,15 @@
   --color-muted-gray: #535353;
   --color-neutral-gray: #b3b3b3;
   --color-border-subtle: #282828;
-  
+
+  /* 深色主题下四档提亮；「良好」就是主色本身，不另造一个绿 */
+  --rating-forgot: #f2555f;
+  --rating-hard: #f5b642;
+  --rating-good: #1DB954;
+  --rating-easy: #38bdf8;
+
+  --shadow-card-raw: 0 1px 2px rgba(0, 0, 0, 0.4);
+
   --shadow-level-3: 0 -8px 24px rgba(0, 0, 0, 0.5);
 }
 
@@ -48,6 +138,7 @@
   --color-primary-hover: var(--color-primary-hover);
   --color-primary-text: var(--color-primary-text);
   --color-ai-blue: var(--color-ai-blue);
+  --color-ai-blue-text: var(--color-ai-blue-text);
   --color-background-void: var(--color-background-void);
   --color-surface-1: var(--color-surface-1);
   --color-surface-2: var(--color-surface-2);
@@ -62,10 +153,278 @@
   --color-warning: var(--color-warning);
   --color-error: var(--color-error);
 
+  /* 四档语义色。用 --rating-* 作为原值再映射，避免 --color-x: var(--color-x) 自引用 */
+  --color-rating-forgot: var(--rating-forgot);
+  --color-rating-hard: var(--rating-hard);
+  --color-rating-good: var(--rating-good);
+  --color-rating-easy: var(--rating-easy);
+
+  /* 卡片规格：12px 圆角 + 1px 描边 + 极浅阴影。
+     这是**唯一**的卡片圆角来源（rounded-card / .surface-card 都用它）。 */
+  --radius-card: 12px;
+  --shadow-card: var(--shadow-card-raw);
+
   --font-sans: var(--font-dm-sans), sans-serif;
   --font-mono: var(--font-jetbrains-mono), monospace;
-  
+  /* 衬线只给数字与大标题。不引入 next/font：中文衬线字体体积大，
+     构建期下载还会让离线构建失败，用系统字体（macOS 自带宋体）足够。 */
+  --font-serif: "Noto Serif SC", "Songti SC", "Source Han Serif SC", Georgia, serif;
+
   --shadow-level-3: var(--shadow-level-3);
+}
+
+/* ============================================================
+   设计语言：页面骨架 / 标题 / 按钮 / 选择项 / 输入框
+   ------------------------------------------------------------
+   为什么做成类而不是到处堆 utility：
+   同一个「主要按钮」在六个页面里出现过 12 次，每次的圆角、字重、
+   字色都略有不同（12px 白字 / 12px 黑字 / 11px 白字 / 8px 圆角…）。
+   集中成一份定义之后，「改一次全站生效」，也没人需要再记住该写
+   text-white 还是 text-black —— 那个问题的答案永远是 primary-text。
+
+   放在 @layer components 里，所以单个元素仍可以用 utility 覆盖它
+   （例如 `btn btn-sm w-full`）。utility 的优先级在 components 之后。
+   ============================================================ */
+@layer components {
+  /* ---- 页面骨架 ---- */
+  .page-scroll {
+    flex: 1;
+    /* 常驻滚动条轨道：内容短的页面（今日）没有滚动条，内容长的页面
+       （看板/设置）会吃掉 15px 的宽度，来回切页时正文会左右跳 7px。
+       overflow-y: scroll 让轨道永远存在，宽度就恒定。
+       不用 scrollbar-gutter: stable —— 它会被 CSS 编译器按目标浏览器
+       集合丢掉（服务端产物里查不到这条声明），靠它等于没写。
+       轨道本身由下面的滚动条样式做成透明，所以没内容可滚时看不见。 */
+    overflow-y: scroll;
+    scrollbar-gutter: stable;
+  }
+
+  /* 文档页容器：宽度上限 + 居中 + 统一左右留白。
+     全站只有这一个容器——复习页原来单独一个 560 的「专注页」壳，
+     已经并进来了。少一个壳，就没有「哪页该用哪个」的选择题。 */
+  .page-shell {
+    width: 100%;
+    max-width: var(--page-max);
+    margin-inline: auto;
+    padding: var(--page-pad-y) var(--page-pad-x) 64px;
+  }
+
+  /* ---- 标题层级 ---- */
+  /* 小写英文眉标：六个页面共用，字体与字距一致 */
+  .eyebrow {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    line-height: 1.4;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--color-text-secondary);
+  }
+
+  .page-title {
+    font-family: var(--font-sans);
+    font-size: 26px;
+    line-height: 1.25;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    color: var(--color-text-primary);
+  }
+
+  .page-sub {
+    margin-top: 4px;
+    font-size: 12px;
+    line-height: 1.6;
+    color: var(--color-text-secondary);
+  }
+
+  /* 区块标题（卡片内部的「习惯 · 0/5」那一类） */
+  .section-title {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    line-height: 1.4;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    color: var(--color-text-secondary);
+  }
+
+  /* 真正的区块标题（「每日新卡上限」「项目实战」这类）：
+     之前是 14 / 16 两档混用，14 和正文一样大，读起来分不出层级。
+     定在 16 —— 比正文（12/13）大一档，比页面标题（26）小一档。
+     和 .section-title 的分工：这个是「小节」，那个是「栏目标签」。 */
+  .section-heading {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-family: var(--font-sans);
+    font-size: 16px;
+    line-height: 1.4;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    color: var(--color-text-primary);
+  }
+
+  /* ---- 按钮 ----
+     四个尺寸，高度固定：26 / 32 / 38 / 48。
+     之前同一个页面里同时存在 23/25/29/30/32/33/34/36/40/41/54/56px 的按钮。 */
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    border: 1px solid transparent;
+    border-radius: var(--radius-btn);
+    font-weight: 600;
+    white-space: nowrap;
+    transition: background-color 0.15s ease, color 0.15s ease,
+      border-color 0.15s ease, opacity 0.15s ease;
+  }
+  /* 禁用态不用 opacity：主色按钮降到 45% 会变成「淡绿底 + 淡白字」，
+     两头的对比度一起塌，比启用态更难读。改成中性底 + 明确的灰字，
+     用户一眼就知道「现在按不动」，而不是「这按钮坏了」。 */
+  .btn:disabled {
+    opacity: 1;
+    cursor: not-allowed;
+    background-color: var(--color-surface-2);
+    border-color: var(--color-border-subtle);
+    color: var(--color-text-secondary);
+  }
+  .btn-primary:disabled:hover {
+    background-color: var(--color-surface-2);
+  }
+  .btn:active:not(:disabled) {
+    transform: scale(0.985);
+  }
+
+  .btn-xs { height: 26px; padding: 0 10px; font-size: 10px; border-radius: var(--radius-field); }
+  .btn-sm { height: 32px; padding: 0 12px; font-size: 11px; }
+  .btn-md { height: 38px; padding: 0 16px; font-size: 13px; }
+  .btn-lg { height: 48px; padding: 0 20px; font-size: 14px; border-radius: var(--radius-card); }
+
+  /* 主要按钮：字色只取 --color-primary-text（亮=白 / 暗=黑） */
+  .btn-primary {
+    background-color: var(--color-primary);
+    color: var(--color-primary-text);
+  }
+  .btn-primary:hover:not(:disabled) {
+    background-color: var(--color-primary-hover);
+  }
+
+  /* 次要按钮：有边框、无底色，和主要按钮同一高度时视觉重量明显更低 */
+  .btn-secondary {
+    background-color: var(--color-surface-1);
+    border-color: var(--color-border-subtle);
+    color: var(--color-text-secondary);
+  }
+  .btn-secondary:hover:not(:disabled) {
+    background-color: var(--color-surface-2);
+    color: var(--color-text-primary);
+  }
+
+  /* 纯文字按钮 */
+  .btn-ghost {
+    background-color: transparent;
+    color: var(--color-text-secondary);
+  }
+  .btn-ghost:hover:not(:disabled) {
+    background-color: var(--color-surface-2);
+    color: var(--color-text-primary);
+  }
+
+  /* 填充在 surface 上的中性按钮（「取消」「+」「−」这类） */
+  .btn-soft {
+    background-color: var(--color-surface-2);
+    color: var(--color-text-primary);
+    border-color: var(--color-border-subtle);
+  }
+  .btn-soft:hover:not(:disabled) {
+    background-color: var(--color-surface-3);
+  }
+
+  .btn-ai {
+    background-color: var(--color-ai-blue);
+    color: var(--color-ai-blue-text);
+  }
+  .btn-ai:hover:not(:disabled) {
+    opacity: 0.9;
+  }
+
+  /* ---- 选择项（题型 / 能量档 / 表单类型 / 看板页签）---- */
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    /* 与 .btn-sm 同高：选择项常常紧挨着按钮出现（「题型」+「重来」），
+       差 2px 会让人以为是没对齐，而不是「刻意小一档」。 */
+    height: 32px;
+    padding: 0 12px;
+    border-radius: var(--radius-field);
+    border: 1px solid var(--color-border-subtle);
+    background-color: transparent;
+    color: var(--color-text-secondary);
+    font-size: 11px;
+    font-weight: 600;
+    white-space: nowrap;
+    transition: background-color 0.15s ease, color 0.15s ease,
+      border-color 0.15s ease;
+  }
+  .chip:hover:not(:disabled) {
+    color: var(--color-text-primary);
+    background-color: var(--color-surface-2);
+  }
+  .chip-active,
+  .chip-active:hover {
+    border-color: var(--color-primary);
+    background-color: color-mix(in oklab, var(--color-primary) 12%, transparent);
+    color: var(--color-primary);
+  }
+
+  /* ---- 表单控件 ---- */
+  .field {
+    width: 100%;
+    height: 38px;
+    border-radius: var(--radius-field);
+    border: 1px solid var(--color-border-subtle);
+    background-color: var(--color-surface-2);
+    padding: 0 12px;
+    font-size: 13px;
+    line-height: 1.5;
+    color: var(--color-text-primary);
+    transition: border-color 0.15s ease, background-color 0.15s ease;
+  }
+  .field::placeholder {
+    color: var(--color-muted-gray);
+  }
+  .field:focus {
+    outline: none;
+    border-color: var(--color-primary);
+    background-color: var(--color-surface-1);
+  }
+  .field-area {
+    height: auto;
+    min-height: 120px;
+    padding: 10px 12px;
+    resize: vertical;
+  }
+
+  /* 空态卡：只留虚线边，不带投影 —— 有阴影的虚线框看着像渲染坏了 */
+  .surface-empty {
+    border-radius: var(--radius-card);
+    border: 1px dashed var(--color-border-subtle);
+    background-color: transparent;
+  }
+
+  /* 卡片：12px 圆角 + 1px 描边 + 极浅阴影（唯一卡片规格） */
+  .surface-card {
+    border-radius: var(--radius-card);
+    border: 1px solid var(--color-border-subtle);
+    background-color: var(--color-surface-1);
+    box-shadow: var(--shadow-card);
+  }
+}
+
+/* 数字用等宽表格数字，避免评分间隔在切换时左右跳动 */
+.tnum {
+  font-variant-numeric: tabular-nums;
 }
 
 body {
