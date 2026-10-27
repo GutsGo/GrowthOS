@@ -1,194 +1,96 @@
 "use client";
 
-import React, { useMemo, useState, useEffect } from "react";
-import { db, HabitLog, Card } from "@/lib/db";
+import React, { useMemo, useState, useSyncExternalStore } from "react";
+import { db } from "@/lib/db";
 import { useLiveQuery } from "dexie-react-hooks";
 import { motion, AnimatePresence } from "framer-motion";
-import { Layers, Flame, Target, Award, Info, Zap, Lock, Unlock, Trophy } from "lucide-react";
+import { Flame, Target, Award, Info, Zap } from "lucide-react";
 import confetti from "canvas-confetti";
 import SpotlightCard from "./reactbits/SpotlightCard";
+import {
+  buildAttendanceWindow,
+  buildMilestones,
+  collectActiveDays,
+  formatRate,
+} from "@/lib/learning/attendance";
+import { RATING_META, type Rating } from "@/lib/learning/types";
 
-export default function StatsView() {
-  const habitLogs = useLiveQuery(() => db.habitLogs.toArray()) || [];
-  const habits = useLiveQuery(() => db.habits.toArray()) || [];
-  const dailyRecords = useLiveQuery(() => db.dailyRecords.toArray()) || [];
-  const cards = useLiveQuery(() => db.cards.toArray()) || [];
+/**
+ * 「是否已挂载」的 lint 友好写法。
+ * 原来的 `useState(false) + useEffect(setMounted(true))` 会触发
+ * react-hooks/set-state-in-effect（级联渲染）；改用外部 store 快照，
+ * 服务端拿到 false、客户端拿到 true，既不闪也不报 hydration 不一致。
+ */
+const emptySubscribe = () => () => {};
+const useIsMounted = () =>
+  useSyncExternalStore(
+    emptySubscribe,
+    () => true,
+    () => false,
+  );
+
+interface EnergyPoint {
+  shortStr: string;
+  dateStr: string;
+  energy: number;
+  x: number;
+  y: number;
+}
+
+/** 雷达图的五个维度。放在组件外——写在组件里的话每次渲染都是新数组，
+ *  以它为依赖的 useMemo 会失效，加进依赖数组又会把缓存打穿。 */
+const RADAR_DIMENSIONS = [
+  { key: "tech", label: "技术深度" },
+  { key: "lang", label: "语言广度" },
+  { key: "body", label: "身体机能" },
+  { key: "social", label: "社交连接" },
+  { key: "feynman", label: "表达输出" },
+];
+
+export default function StatsView({ embedded = false }: { embedded?: boolean } = {}) {
+  /*
+   * `useLiveQuery(...) || []` 每次渲染都会新建一个空数组。
+   * 数据还没到时它是个新引用，下面就有一堆 useMemo 以它为依赖 ——
+   * 于是「有没有数据」都会每帧重算一遍，`useMemo` 等于没写。
+   * 拆成「原始值 + 稳定的兜底」两行，引用只在数据真变的时候才换。
+   */
+  const habitLogsRaw = useLiveQuery(() => db.habitLogs.toArray());
+  const dailyRecordsRaw = useLiveQuery(() => db.dailyRecords.toArray());
+  const cardsRaw = useLiveQuery(() => db.cards.toArray());
+  const reviewEventsRaw = useLiveQuery(() => db.reviewEvents.toArray());
+
+  const habitLogs = useMemo(() => habitLogsRaw ?? [], [habitLogsRaw]);
+  const dailyRecords = useMemo(() => dailyRecordsRaw ?? [], [dailyRecordsRaw]);
+  const cards = useMemo(() => cardsRaw ?? [], [cardsRaw]);
+  const reviewEvents = useMemo(() => reviewEventsRaw ?? [], [reviewEventsRaw]);
 
   // 挂载状态，防止服务端与客户端水合不一致
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => {
-    setMounted(true);
-  }, []);
+  const mounted = useIsMounted();
 
   // 能量波动折线图 Hover 状态
-  const [hoveredPoint, setHoveredPoint] = useState<any | null>(null);
+  const [hoveredPoint, setHoveredPoint] = useState<EnergyPoint | null>(null);
 
   // ==========================================
-  // 1. Streak 连续打卡自适应算法（包含常规习惯打卡与已完成 AI 任务排程）
+  // 1. 出勤统计（替代原来的「连续打卡天数」）
+  //
+  // 手册第七章：打卡是「看见频率」，不是道德评分。所以这里：
+  // - 不计算 currentStreak，界面上也不出现「连续 N 天」
+  // - 只回答「近 30 天来了几天」和「比例是多少」
+  // 断一天不会归零，也不会让人为了不断链而做假打卡。
   // ==========================================
-  const streakInfo = useMemo(() => {
-    const datesSet = new Set<string>();
-
-    // 1. 收集常规与特化习惯打卡日期
-    habitLogs.forEach((l) => datesSet.add(l.date));
-
-    // 2. 收集有完成过至少一项 AI 排程任务的日期
-    dailyRecords.forEach((r) => {
-      if (r.aiTasks && r.aiTasks.some((t) => t.isCompleted)) {
-        datesSet.add(r.date);
-      }
+  const attendance = useMemo(() => {
+    const active = collectActiveDays({
+      habitDates: habitLogs.map((l) => l.date),
+      dailyRecords,
+      reviewEventAts: reviewEvents.map((e) => e.at),
     });
+    return buildAttendanceWindow(active, { days: 30 });
+  }, [habitLogs, dailyRecords, reviewEvents]);
 
-    const dates = Array.from(datesSet).sort(
-      (a, b) => new Date(b).getTime() - new Date(a).getTime()
-    );
-
-    if (dates.length === 0) return { current: 0, max: 0 };
-
-    // 格式化当前时区的今日和昨日日期
-    const getLocalDateStr = (d: Date) => {
-      const year = d.getFullYear();
-      const month = String(d.getMonth() + 1).padStart(2, "0");
-      const date = String(d.getDate()).padStart(2, "0");
-      return `${year}-${month}-${date}`;
-    };
-
-    const todayStr = getLocalDateStr(new Date());
-    const yesterday = new Date();
-    yesterday.setDate(yesterday.getDate() - 1);
-    const yesterdayStr = getLocalDateStr(yesterday);
-
-    let current = 0;
-    const latestDate = dates[0];
-
-    // 如果最晚的打卡日期既不是今天也不是昨天，说明已经断签，当前 Streak 为 0
-    if (latestDate !== todayStr && latestDate !== yesterdayStr) {
-      current = 0;
-    } else {
-      current = 1;
-      let prevDate = new Date(latestDate.replace(/-/g, "/")); // 避免 Safari NaN 兼容问题
-      
-      for (let i = 1; i < dates.length; i++) {
-        const currDate = new Date(dates[i].replace(/-/g, "/"));
-        const diffTime = prevDate.getTime() - currDate.getTime();
-        const diffDays = Math.round(diffTime / (1000 * 60 * 60 * 24));
-        
-        if (diffDays === 1) {
-          current++;
-          prevDate = currDate;
-        } else if (diffDays > 1) {
-          break; // 中断了
-        }
-      }
-    }
-
-    // 计算历史最大连续天数 (Max Streak)
-    const sortedDates = [...dates].reverse();
-    let max = 0;
-    let tempMax = 0;
-    let lastDate: Date | null = null;
-
-    sortedDates.forEach((dateStr) => {
-      const d = new Date(dateStr.replace(/-/g, "/"));
-      if (!lastDate) {
-        tempMax = 1;
-      } else {
-        const diffDays = Math.round((d.getTime() - lastDate.getTime()) / (1000 * 60 * 60 * 24));
-        if (diffDays === 1) {
-          tempMax++;
-        } else if (diffDays > 1) {
-          if (tempMax > max) max = tempMax;
-          tempMax = 1;
-        }
-      }
-      lastDate = d;
-    });
-    if (tempMax > max) max = tempMax;
-
-    return { current, max };
-  }, [habitLogs, dailyRecords]);
-
-  // ==========================================
-  // 2. 6 大极客成就徽章锁定义与计算
-  // ==========================================
-  const badges = useMemo(() => {
-    // 🌱 破土萌芽: 7 天 Streak
-    const isSprout = mounted && streakInfo.current >= 7;
-    // 🔥 烈火淬炼: 30 天 Streak
-    const isFlame = mounted && streakInfo.current >= 30;
-    // 👑 傲视群雄: 100 天 Streak
-    const isCrown = mounted && streakInfo.current >= 100;
-    
-    // ⚡️ 能量掌控者: 能量滑块 10 或 1 且今日有打卡
-    const isEnergyMaster = mounted && dailyRecords.some(
-      (r) => r.energyLevel === 10 || r.energyLevel === 1
-    ) && habitLogs.length > 0;
-    
-    // 🧠 记忆大师: card reps 累积 >= 25
-    const totalReps = cards.reduce((acc, c) => acc + (c.reps || 0), 0);
-    const isMemoryMaster = mounted && totalReps >= 25 && cards.length >= 4;
-
-    // 🏆 社交博弈王: 社交打卡 >= 3 次
-    const socialLogsCount = habitLogs.filter((l) => l.customData?.contact).length;
-    const isSocialKing = mounted && socialLogsCount >= 3;
-
-    return [
-      {
-        id: "sprout",
-        name: "破土萌芽",
-        desc: "习惯连续打卡达到 7 天。种下一颗自律的种子，开始破土拔节。",
-        icon: "🌱",
-        unlocked: isSprout,
-        condition: "连续打卡 7 天",
-        color: "from-emerald-500/10 to-teal-500/10 border-emerald-500/35 text-emerald-400 shadow-[0_0_12px_rgba(16,185,129,0.15)]",
-      },
-      {
-        id: "flame",
-        name: "烈火淬炼",
-        desc: "习惯连续打卡达到 30 天。你的习惯已熔铸成坚如磐石的物理记忆。",
-        icon: "🔥",
-        unlocked: isFlame,
-        condition: "连续打卡 30 天",
-        color: "from-orange-500/10 to-red-500/10 border-orange-500/35 text-orange-400 shadow-[0_0_12px_rgba(249,115,22,0.15)]",
-      },
-      {
-        id: "crown",
-        name: "傲视群雄",
-        desc: "习惯连续打卡达到 100 天。登顶百日自律之巅，脱胎换骨的终极蜕变。",
-        icon: "👑",
-        unlocked: isCrown,
-        condition: "连续打卡 100 天",
-        color: "from-amber-500/10 to-yellow-500/10 border-amber-500/35 text-amber-400 shadow-[0_0_12px_rgba(245,158,11,0.2)]",
-      },
-      {
-        id: "energy",
-        name: "能量掌控者",
-        desc: "在生理精力极佳(10)或极度疲惫(1)的状态下均能坚持打卡前行。",
-        icon: "⚡️",
-        unlocked: isEnergyMaster,
-        condition: "在 1 或 10 能量下完成习惯",
-        color: "from-indigo-500/10 to-purple-500/10 border-indigo-500/35 text-indigo-400 shadow-[0_0_12px_rgba(99,102,241,0.15)]",
-      },
-      {
-        id: "memory",
-        name: "记忆大师",
-        desc: "第二大脑闪卡复习 reps 累计达到 25 次以上，对抗遗忘曲线。",
-        icon: "🧠",
-        unlocked: isMemoryMaster,
-        condition: "卡片累计复习 25 次",
-        color: "from-blue-500/10 to-cyan-500/10 border-blue-500/35 text-blue-400 shadow-[0_0_12px_rgba(59,130,246,0.15)]",
-      },
-      {
-        id: "social_king",
-        name: "社交博弈王",
-        desc: "在社交特化表单中累计反思并记录 3 次以上的深度对话博弈细节。",
-        icon: "🏆",
-        unlocked: isSocialKing,
-        condition: "记录 3 次社交谈话反思",
-        color: "from-pink-500/10 to-rose-500/10 border-pink-500/35 text-pink-400 shadow-[0_0_12px_rgba(236,72,153,0.15)]",
-      },
-    ];
-  }, [streakInfo, dailyRecords, cards, habitLogs, mounted]);
+  const milestones = useMemo(
+    () => buildMilestones(attendance),
+    [attendance],
+  );
 
   // 点击已解锁徽章触发彩屑爆破
   const handleBadgeClick = (unlocked: boolean) => {
@@ -360,14 +262,6 @@ export default function StatsView() {
   // ==========================================
   // 5. 五维能力雷达图计算 (SVG 绘制)
   // ==========================================
-  const radarDimensions = [
-    { key: "tech", label: "技术深度 (AI/代码)" },
-    { key: "lang", label: "语言广度 (英语)" },
-    { key: "body", label: "身体机能 (力量/健身)" },
-    { key: "social", label: "社交连接 (表达/倾听)" },
-    { key: "feynman", label: "表达魅力 (费曼输出)" },
-  ];
-
   const radarScores = useMemo(() => {
     if (!mounted) {
       return { tech: 30, lang: 30, body: 30, social: 30, feynman: 30 };
@@ -416,7 +310,7 @@ export default function StatsView() {
       return gPoints.join(" ");
     });
 
-    const labels = radarDimensions.map((dim, idx) => {
+    const labels = RADAR_DIMENSIONS.map((dim, idx) => {
       const labelRadius = radius + 24;
       const x = center + labelRadius * Math.cos(angles[idx]);
       const y = center + labelRadius * Math.sin(angles[idx]);
@@ -436,7 +330,7 @@ export default function StatsView() {
   }, [radarScores]);
 
   const highestTrait = useMemo(() => {
-    if (!mounted) return "数据加载中...";
+    if (!mounted) return "加载中…";
     const keys: ("tech" | "lang" | "body" | "social" | "feynman")[] = ["tech", "lang", "body", "social", "feynman"];
     let maxKey = keys[0];
     keys.forEach((key) => {
@@ -446,123 +340,166 @@ export default function StatsView() {
     });
     
     const traitNames = {
-      tech: "技术探索者 (专注深度代码与工程挑战)",
-      lang: "国际化视野者 (持续学习英语与拓宽触角)",
-      body: "精力管理者 (极佳的身体恢复和能量充电)",
-      social: "情商共鸣者 (注重与他人建立真实深入的连接)",
-      feynman: "深度传播者 (善于通过费曼法输出提炼核心知识)",
+      tech: "技术探索者",
+      lang: "国际化视野者",
+      body: "精力管理者",
+      social: "情商共鸣者",
+      feynman: "深度传播者",
     };
     return traitNames[maxKey];
   }, [radarScores, mounted]);
 
+  /**
+   * 自评分布（来自 reviewEvents 事件流）。
+   *
+   * 只统计真实发生过的复习事件，不用卡片当前字段反推——
+   * 反推出来的分布会随卡片状态变化，看着像数据，其实不是。
+   */
+  const { reviewTotal, topRatingLabel } = useMemo(() => {
+    const counts = new Map<number, number>();
+    for (const e of reviewEvents) {
+      counts.set(e.rating, (counts.get(e.rating) ?? 0) + 1);
+    }
+
+    let top: { rating: Rating; count: number } | null = null;
+    for (const [rating, count] of counts) {
+      if (!top || count > top.count) top = { rating: rating as Rating, count };
+    }
+
+    return {
+      reviewTotal: reviewEvents.length,
+      topRatingLabel: top
+        ? { ...top, label: RATING_META[top.rating]?.label ?? "未知" }
+        : null,
+    };
+  }, [reviewEvents]);
+
 
   return (
-    <div className="flex-1 overflow-y-auto px-4 py-4 md:px-8 md:py-6 space-y-8 select-none">
+    <div
+      className={
+        embedded
+          ? // 嵌进看板时不要再套一层滚动容器与页头，否则会出现双滚动条和两个「看板」标题
+            "space-y-8 select-none"
+          : "flex-1 overflow-y-auto px-4 py-4 md:px-8 md:py-6 space-y-8 select-none"
+      }
+    >
       {/* 顶部 Header */}
-      <div>
-        <span className="text-xs text-text-secondary font-mono uppercase tracking-widest">
-          STATISTICS & ACHIEVEMENTS
-        </span>
-        <h1 className="text-3xl font-extrabold tracking-tight mt-1">数据、复盘与成就系统</h1>
-        <p className="text-sm text-text-secondary mt-1">
-          用确凿的自律足迹打磨你的成长勋章。连续击破懈怠，成就终身成长者。
-        </p>
-      </div>
+      {!embedded && (
+        <div>
+          <span className="text-xs text-text-secondary font-mono uppercase tracking-widest">
+            FREQUENCY, NOT STREAK
+          </span>
+          <h1 className="text-3xl font-extrabold tracking-tight mt-1">看板</h1>
+          <p className="text-sm text-text-secondary mt-1">
+            只看频率，不看连续。
+          </p>
+        </div>
+      )}
 
       {/* -------------------------------------------------- */}
-      {/* 新增：自律连击指挥舱 & Achievement勋章墙双栏面板 */}
+      {/* 出勤：替代原来的「连击天数 + 6 枚勋章」 */}
       {/* -------------------------------------------------- */}
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
-        
-        {/* 左栏：打卡连击卡片 (2/5) */}
+        {/* 左栏：出勤率 (2/5) */}
         <section className="lg:col-span-2">
           <SpotlightCard
-            spotlightColor="rgba(29, 185, 84, 0.25)"
-            className="h-full border border-primary/45 bg-gradient-to-br from-surface-1 to-surface-2 p-6 rounded-2xl flex flex-col justify-between shadow-[0_0_20px_rgba(29,185,84,0.1)] relative overflow-hidden"
+            spotlightColor="rgba(29, 185, 84, 0.2)"
+            className="surface-card h-full p-6 flex flex-col justify-between relative overflow-hidden"
           >
             <div className="absolute -right-12 -top-12 w-32 h-32 rounded-full bg-primary/5 blur-3xl pointer-events-none" />
-            
+
             <div className="space-y-4">
               <div className="flex items-center justify-between">
                 <span className="text-[10px] uppercase font-bold tracking-widest text-text-secondary font-mono">
-                  Habit Streaks Dashboard
+                  Last 30 Days
                 </span>
-                <Flame className="w-5 h-5 text-primary animate-pulse" />
+                <Flame className="w-5 h-5 text-primary" />
               </div>
-              
+
               <div className="py-2">
                 <span className="text-[11px] text-text-secondary font-mono uppercase tracking-wider block">
-                  当前自律连击天数
+                  这 30 天里你来了
                 </span>
                 <div className="flex items-baseline gap-2 mt-1">
-                  <span className="text-5xl md:text-6xl font-black font-mono tracking-tighter text-primary drop-shadow-[0_0_12px_rgba(29,185,84,0.3)]">
-                    {mounted ? streakInfo.current : 0}
+                  <span className="text-5xl md:text-6xl font-black font-mono tracking-tighter text-primary">
+                    {mounted ? attendance.activeDays : 0}
                   </span>
-                  <span className="text-sm font-bold text-text-secondary">DAYS STREAK</span>
+                  <span className="text-sm font-bold text-text-secondary">
+                    / {mounted ? attendance.elapsedDays : 30} 天
+                  </span>
                 </div>
+                <p className="text-xs text-text-secondary mt-2 font-mono">
+                  出勤率 {mounted ? formatRate(attendance.rate) : "—"}
+                </p>
               </div>
             </div>
 
-            <div className="border-t border-border-subtle/50 pt-5 mt-6 space-y-3">
-              <div className="flex justify-between items-center text-xs">
-                <span className="text-text-secondary font-medium">历史最高连击天数:</span>
-                <span className="font-bold font-mono text-text-primary text-sm flex items-center gap-1">
-                  🔥 {mounted ? streakInfo.max : 0} 天
-                </span>
-              </div>
-              <p className="text-[10px] text-neutral-gray leading-relaxed bg-surface-3/50 p-2.5 rounded-lg border border-border-subtle/50 font-mono uppercase tracking-widest text-center">
-                🔥 Keep the fire burning, build your momentum!
+            <div className="border-t border-border-subtle/50 pt-5 mt-6">
+              <p className="text-[10px] text-neutral-gray leading-relaxed bg-surface-3/50 p-2.5 rounded-lg border border-border-subtle/50 text-center">
+                断一天不会归零，只是空一格。
               </p>
             </div>
           </SpotlightCard>
         </section>
 
-        {/* 右栏：6 大极客成就徽章墙 (3/5) */}
-        <section className="lg:col-span-3 bg-surface-1 border border-border-subtle p-5 rounded-2xl space-y-4">
+        {/* 右栏：30 格出勤 + 两枚里程碑 (3/5) */}
+        <section className="lg:col-span-3 p-5 space-y-5 surface-card">
           <h2 className="text-sm font-bold uppercase tracking-widest text-text-primary font-mono flex items-center gap-2">
-            <Trophy className="w-4 h-4 text-amber-500" /> 极客成就勋章墙 (Achievements)
+            <Target className="w-4 h-4 text-primary" /> 近 30 天出勤格子
           </h2>
 
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-            {badges.map((badge) => (
+          <div className="flex flex-wrap gap-1.5">
+            {(mounted ? attendance.cells : []).map((cell) => (
               <div
-                key={badge.id}
-                onClick={() => handleBadgeClick(badge.unlocked)}
-                title={badge.unlocked ? `${badge.name}: 点击炫耀一下！` : `未解锁：${badge.condition}`}
-                className={`relative p-3 rounded-xl border flex flex-col items-center text-center justify-between gap-2.5 transition-all duration-300 ${
-                  badge.unlocked
-                    ? `bg-gradient-to-b cursor-pointer hover:scale-[1.03] active:scale-95 ${badge.color}`
-                    : "bg-surface-2/40 border-border-subtle text-neutral-gray opacity-45 select-none"
+                key={cell.date}
+                title={`${cell.date} · ${cell.active ? "来过" : "没来"}`}
+                className={`w-5 h-5 rounded-[4px] transition-colors ${
+                  cell.isFuture
+                    ? "bg-transparent border border-dashed border-border-subtle/40"
+                    : cell.active
+                      ? "bg-primary/80"
+                      : "bg-surface-3 border border-border-subtle/20"
+                } ${cell.isToday ? "ring-1 ring-primary ring-offset-2 ring-offset-surface-1" : ""}`}
+              />
+            ))}
+            {!mounted && (
+              <div className="h-5 w-full text-[10px] text-text-secondary font-mono">
+                读取中…
+              </div>
+            )}
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+            {milestones.map((milestone) => (
+              <div
+                key={milestone.id}
+                onClick={() => handleBadgeClick(milestone.unlocked)}
+                className={`p-3 rounded-xl border transition-all ${
+                  milestone.unlocked
+                    ? "border-primary/40 bg-primary/5 cursor-pointer hover:scale-[1.02] active:scale-95"
+                    : "border-border-subtle bg-surface-2/30"
                 }`}
               >
-                {/* 锁图标 */}
-                <div className="absolute top-2 right-2">
-                  {badge.unlocked ? (
-                    <Unlock className="w-3 h-3 text-primary opacity-60" />
-                  ) : (
-                    <Lock className="w-3 h-3 text-neutral-gray opacity-60" />
-                  )}
+                <div className="flex items-center justify-between">
+                  <span className="flex items-center gap-1.5 text-xs font-bold text-text-primary">
+                    {milestone.name}
+                  </span>
+                  <span className="text-[10px] font-mono text-text-secondary">
+                    {milestone.unlocked
+                      ? "已达成"
+                      : `${Math.min(attendance.activeDays, milestone.target)}/${milestone.target}`}
+                  </span>
                 </div>
-
-                {/* 徽章大图标 */}
-                <span className={`text-3xl filter transition-transform duration-300 ${badge.unlocked ? "drop-shadow-lg hover:rotate-12" : "grayscale"}`}>
-                  {badge.icon}
-                </span>
-
-                <div>
-                  <h4 className={`text-xs font-bold ${badge.unlocked ? "text-text-primary" : "text-text-secondary"}`}>
-                    {badge.name}
-                  </h4>
-                  <p className="text-[8px] text-text-secondary mt-0.5 leading-tight line-clamp-2 max-w-[100px] mx-auto">
-                    {badge.desc}
-                  </p>
+                <div className="mt-2 h-1 rounded-full bg-surface-3 overflow-hidden">
+                  <div
+                    className={`h-full rounded-full transition-all ${milestone.unlocked ? "bg-primary" : "bg-primary/50"}`}
+                    style={{ width: `${Math.round(milestone.progress * 100)}%` }}
+                  />
                 </div>
-
-                <span className={`text-[8px] px-1.5 py-0.5 rounded font-mono font-bold uppercase tracking-wider ${
-                  badge.unlocked ? "bg-primary/20 text-primary" : "bg-surface-3 text-neutral-gray"
-                }`}>
-                  {badge.unlocked ? "已解锁" : "未解锁"}
-                </span>
+                <p className="text-[10px] text-text-secondary mt-2 leading-relaxed">
+                  {milestone.desc}
+                </p>
               </div>
             ))}
           </div>
@@ -570,10 +507,10 @@ export default function StatsView() {
       </div>
 
       {/* 3. 年度自律活跃热力图 */}
-      <section className="bg-surface-1 border border-border-subtle p-5 rounded-2xl space-y-4">
+      <section className="p-5 space-y-4 surface-card">
         <div className="flex items-center justify-between">
           <h2 className="text-sm font-bold uppercase tracking-widest text-text-primary font-mono flex items-center gap-2">
-            <Flame className="w-4 h-4 text-primary" /> 年度自律活跃热力图 (Last 12 Months)
+            <Flame className="w-4 h-4 text-primary" /> 年度活跃热力图
           </h2>
           <div className="flex items-center gap-1.5 text-[10px] text-text-secondary font-mono">
             <span>少</span>
@@ -652,7 +589,7 @@ export default function StatsView() {
       {/* 4. 下方 Grid (五维雷达图与能量波动曲线) */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         {/* 左栏：五维能力雷达图 */}
-        <section className="bg-surface-1 border border-border-subtle p-5 rounded-2xl flex flex-col items-center gap-4">
+        <section className="p-5 flex flex-col items-center gap-4 surface-card">
           <h2 className="text-sm font-bold uppercase tracking-widest text-text-primary font-mono w-full text-left flex items-center gap-2">
             <Target className="w-4 h-4 text-ai-blue" /> 五维能力雷达分布
           </h2>
@@ -719,9 +656,9 @@ export default function StatsView() {
         </section>
 
         {/* 右栏：近 7 天能量波动曲线 */}
-        <section className="bg-surface-1 border border-border-subtle p-5 rounded-2xl flex flex-col items-center gap-4 relative">
+        <section className="p-5 flex flex-col items-center gap-4 relative surface-card">
           <h2 className="text-sm font-bold uppercase tracking-widest text-text-primary font-mono w-full text-left flex items-center gap-2">
-            <Zap className="w-4 h-4 text-primary" /> 近 7 天能量波动曲线 (Energy Trend)
+            <Zap className="w-4 h-4 text-primary" /> 近 7 天能量曲线
           </h2>
 
           <div className="w-full flex justify-center py-2 relative">
@@ -823,7 +760,7 @@ export default function StatsView() {
                   }}
                 >
                   <span className="text-text-secondary">{hoveredPoint.dateStr}</span>
-                  <span className="text-primary font-bold">🔋 能量: {hoveredPoint.energy}/10</span>
+                  <span className="text-primary font-bold">能量 {hoveredPoint.energy}/10</span>
                 </motion.div>
               )}
             </AnimatePresence>
@@ -831,30 +768,58 @@ export default function StatsView() {
         </section>
       </div>
 
-      {/* 5. AI 能力与习惯特质洞察 */}
-      <section className="bg-gradient-to-br from-surface-1 to-surface-2 border border-border-subtle p-5 rounded-2xl flex flex-col gap-4 relative overflow-hidden">
+      {/* 5. 数据里能直接看出来的事实
+          这一段原来是一段硬编码的「AI 教练诊断」，它会建议用户
+          「今晚 21:00 前往 AI 教练舱开启一次模拟演练」——而那个页面
+          Phase 4 已经删了。假数据 + 死链接，比什么都不写更糟，
+          所以改成纯事实陈述：只报数字，不给建议。 */}
+      <section className="bg-gradient-to-br from-surface-1 to-surface-2 border border-border-subtle p-5 rounded-xl flex flex-col gap-4 relative overflow-hidden">
         <div className="absolute -right-8 -bottom-8 w-28 h-28 bg-primary/10 rounded-full blur-2xl" />
-        
+
         <div className="space-y-4">
           <h2 className="text-sm font-bold uppercase tracking-widest text-text-primary font-mono flex items-center gap-2">
-            <Award className="w-4 h-4 text-amber-500" /> AI 能力与习惯特质洞察 (AI Insights)
+            <Award className="w-4 h-4 text-amber-500" /> 从记录里能看出来的事
           </h2>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             <div className="md:col-span-1 bg-surface-2/40 p-4 rounded-xl border border-border-subtle/50">
               <span className="text-[10px] text-text-secondary uppercase tracking-widest block font-mono">
-                当前最卓越能力标签
+                练得最多的一类
               </span>
               <p className="text-sm font-bold text-primary mt-1">{highestTrait}</p>
             </div>
 
             <div className="md:col-span-2 space-y-1.5">
               <span className="text-[10px] text-text-secondary uppercase tracking-widest block font-mono">
-                教练复盘诊断建议 (Feynman Coach)
+                自评分布
               </span>
-              <p className="text-xs text-text-secondary leading-relaxed">
-                你最近在技术深度训练上的完成率较高，展现了极强的专注力。但你在社交演练和口语训练中的参与次数偏少。为了实现更均衡的自我进化，教练建议在今晚 21:00 前往 AI 教练舱开启一次模拟演练，我们可以尝试将打卡难度从“低阻力”降为最轻松的 5 分钟起步。
-              </p>
+              {reviewTotal === 0 ? (
+                <p className="text-xs text-text-secondary leading-relaxed">
+                  还没有复习记录。
+                </p>
+              ) : (
+                <>
+                  <p className="text-xs text-text-secondary leading-relaxed">
+                    一共复习了{" "}
+                    <span className="text-text-primary font-bold font-mono">
+                      {reviewTotal}
+                    </span>{" "}
+                    次。最常出现的一档是
+                    <span className="text-primary font-bold">
+                      「{topRatingLabel?.label}」
+                    </span>
+                    （{topRatingLabel?.count} 次，占{" "}
+                    {Math.round(((topRatingLabel?.count ?? 0) / reviewTotal) * 100)}%）。
+                  </p>
+                  <p className="text-[10px] text-text-secondary/70 leading-relaxed">
+                    {topRatingLabel?.rating === 5
+                      ? "总选「简单」会让间隔越拉越长，注意其实没答上来的卡。"
+                      : topRatingLabel?.rating === 0
+                        ? "「忘记」占比高，说明这些卡本就该更早回来。"
+                        : "这一档只反映自评习惯。"}
+                  </p>
+                </>
+              )}
             </div>
           </div>
         </div>
@@ -862,7 +827,7 @@ export default function StatsView() {
         <div className="flex items-center gap-2 bg-surface-3 p-3 rounded-lg border border-border-subtle text-[10px] text-neutral-gray leading-relaxed mt-2">
           <Info className="w-3.5 h-3.5 text-primary flex-shrink-0" />
           <span>
-            能力分值与能量波动每晚根据 IndexedDB 中的实际打卡频率与大模型晚间复盘数据进行后台重新计算更新。
+            数字来自本地复习事件与打卡记录，无估算。
           </span>
         </div>
       </section>

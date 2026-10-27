@@ -14,7 +14,7 @@ const jetbrainsMono = JetBrains_Mono({
 
 export const metadata: Metadata = {
   title: "GrowthOS | 个人自我驱动型成长操作系统",
-  description: "一款基于学习科学与 AI Agent 驱动的个人成长操作系统。融合 WOOP、习惯打卡、SM-2 间隔重复及 AI 陪练，助你无损构建原子习惯与深度知识库。",
+  description: "学习科学与 AI 驱动的个人成长系统：WOOP、习惯打卡、SM-2 间隔重复、AI 陪练。",
 };
 
 export default function RootLayout({

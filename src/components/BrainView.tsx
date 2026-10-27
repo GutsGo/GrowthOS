@@ -1,15 +1,31 @@
 "use client";
 
 import React, { useState, useEffect, useRef, useMemo } from "react";
-import { db, Card, trackDeletion } from "@/lib/db";
+import { db, trackDeletion } from "@/lib/db";
 import { useLiveQuery } from "dexie-react-hooks";
-import { useEditor, EditorContent, Extension } from "@tiptap/react";
+import { useEditor, EditorContent, Extension, type Editor } from "@tiptap/react";
+import type { Node as PMNode } from "@tiptap/pm/model";
 import { useAppStore } from "@/lib/store";
 import StarterKit from "@tiptap/starter-kit";
 import { Plugin, PluginKey } from "@tiptap/pm/state";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import { motion, AnimatePresence } from "framer-motion";
 import { apiFetch } from "@/lib/api";
+import { useLearningSettings } from "@/lib/learning/settings";
+import {
+  CARD_TYPES,
+  CARD_TYPE_LABEL,
+  type CardType,
+} from "@/lib/learning/types";
+import { dayKey } from "@/lib/learning/queue";
+import {
+  MAX_POOL_SIZE,
+  buildCandidates,
+  mergeCandidates,
+  pendingCandidates,
+  type CardCandidate,
+} from "@/lib/learning/probe";
+import CandidatePool from "./brain/CandidatePool";
 import {
   BookOpen,
   Plus,
@@ -19,9 +35,13 @@ import {
   Sparkles,
   Link as LinkIcon,
   HelpCircle,
+  AlertTriangle,
 } from "lucide-react";
 import {
   ReactFlow,
+  type Node as FlowNode,
+  type NodeProps,
+  type ReactFlowInstance,
   Background,
   BackgroundVariant,
   Controls,
@@ -59,9 +79,9 @@ const BiLinkHighlight = Extension.create({
   },
 });
 
-function findBiLinks(doc: any) {
-  const decorations: any[] = [];
-  doc.descendants((node: any, pos: number) => {
+function findBiLinks(doc: PMNode) {
+  const decorations: Decoration[] = [];
+  doc.descendants((node, pos) => {
     if (node.isText) {
       const text = node.text || "";
       const regex = /\[\[(.*?)\]\]/g;
@@ -81,7 +101,11 @@ function findBiLinks(doc: any) {
 }
 
 // 2. React Flow 自定义节点组件
-const CardNodeComponent = ({ data }: any) => {
+/** React Flow 的节点数据。用 type 别名（不是 interface）才满足 v12 的 Record 约束。 */
+type CardNodeData = { label: string; isSelected: boolean };
+type TagNodeData = { label: string };
+
+const CardNodeComponent = ({ data }: NodeProps<FlowNode<CardNodeData, "cardNode">>) => {
   return (
     <div className="relative">
       <Handle
@@ -110,7 +134,7 @@ const CardNodeComponent = ({ data }: any) => {
   );
 };
 
-const TagNodeComponent = ({ data }: any) => {
+const TagNodeComponent = ({ data }: NodeProps<FlowNode<TagNodeData, "tagNode">>) => {
   return (
     <div className="relative">
       <Handle
@@ -147,8 +171,26 @@ interface GraphLink {
 }
 
 export default function BrainView() {
-  const cards = useLiveQuery(() => db.cards.toArray()) || [];
+  // `useLiveQuery(...) || []` 每次渲染都新建一个空数组，而下面多个 useMemo/effect 以它
+  // 为依赖 —— 兜底那个 `[]` 会让「没数据」时也每帧重算。拆成两行，引用只在数据变时换。
+  const cardsRaw = useLiveQuery(() => db.cards.toArray());
+  const cards = useMemo(() => cardsRaw ?? [], [cardsRaw]);
   const theme = useAppStore((state) => state.theme);
+  const currentDate = useAppStore((state) => state.currentDate);
+  const settings = useLearningSettings();
+
+  // 今日新卡记账：到上限后只提醒，不阻止。
+  // 手册第 3 号弃坑机制是「一次做几百张新卡，队列堆爆直接弃坑」，
+  // 所以要有刹车，但刹车不能是「禁止」，否则用户会绕过它（另起一个库）。
+  const newLimit = settings?.dailyNewCardLimit ?? 2;
+  const createdToday = useMemo(
+    () =>
+      cards.filter((c) => {
+        const t = new Date(c.createdAt).getTime();
+        return Number.isFinite(t) && dayKey(t) === currentDate;
+      }).length,
+    [cards, currentDate],
+  );
 
   const [selectedCardId, setSelectedCardId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
@@ -158,10 +200,15 @@ export default function BrainView() {
   const [front, setFront] = useState("");
   const [back, setBack] = useState("");
   const [tagsInput, setTagsInput] = useState("");
+  // v4 字段：一张卡只考一个细节（type），以及一个能让自己记住的例子（example）
+  const [cardType, setCardType] = useState<CardType>("concept");
+  const [example, setExample] = useState("");
 
   // AI 闪卡提取状态与 Toast 提示
   const [selectedText, setSelectedText] = useState("");
   const [isExtracting, setIsExtracting] = useState(false);
+  /** 当前表单的题目是否来自候选池；保存成功后才把它移出池子 */
+  const [adoptedCandidateId, setAdoptedCandidateId] = useState<string | null>(null);
   const [toast, setToast] = useState<{ show: boolean; msg: string; type: "success" | "error" }>({
     show: false,
     msg: "",
@@ -206,7 +253,7 @@ export default function BrainView() {
   }, [filteredSuggestions]);
 
   // 处理双链输入匹配检测
-  const checkSuggestions = (editorInstance: any) => {
+  const checkSuggestions = (editorInstance: Editor) => {
     const { from } = editorInstance.state.selection;
     const textBefore = editorInstance.state.doc.textBetween(Math.max(0, from - 20), from, " ");
     const match = /\[\[([^\]]*)$/.exec(textBefore);
@@ -291,25 +338,34 @@ export default function BrainView() {
     },
   });
 
-  // 监听选中卡片变化，回填表单
-  useEffect(() => {
-    if (selectedCardId) {
-      const activeCard = cards.find((c) => c.id === selectedCardId);
-      if (activeCard) {
-        setFront(activeCard.front);
-        setBack(activeCard.back);
-        setTagsInput(activeCard.tags.join(", "));
-      }
-    } else {
-      setFront("");
-      setBack("");
-      setTagsInput("");
-      if (editor) {
-        editor.commands.clearContent();
-      }
-    }
+  /*
+   * 选中卡片变化 → 回填表单。
+   *
+   * 原来是 useEffect，两个问题：
+   * 1. effect 在这一帧提交之后才跑，中间存在一帧「列表已选中第 3 张、
+   *    右边表单还是第 2 张的内容」。手快的人在这一帧按保存，就存到新卡上去了。
+   * 2. 依赖里带 `cards`，每次 liveQuery 回推（哪怕只是别的卡改了）都会重跑，
+   *    把正在编辑的内容覆盖掉。
+   *
+   * 改成渲染期按「表单当前对应哪张卡」修正：同一个渲染里就是对的，
+   * 且只有 id 真的变了才回填，编辑中不会被后台数据打断。
+   */
+  const [formCardId, setFormCardId] = useState<string | null>(null);
+  if (formCardId !== selectedCardId) {
+    setFormCardId(selectedCardId);
+    const activeCard = selectedCardId
+      ? cards.find((c) => c.id === selectedCardId)
+      : undefined;
+    setFront(activeCard?.front ?? "");
+    setBack(activeCard?.back ?? "");
+    setTagsInput(activeCard?.tags.join(", ") ?? "");
+    setCardType(activeCard?.type ?? "concept");
+    setExample(activeCard?.example ?? "");
     setSelectedText(""); // 切换卡片时重置划词
-  }, [selectedCardId, cards, editor]);
+    if (!activeCard && editor) {
+      editor.commands.clearContent();
+    }
+  }
 
   // 当 back 状态由外部变化时（回填表单），同步更新 TipTap 内容
   useEffect(() => {
@@ -333,9 +389,17 @@ export default function BrainView() {
     );
   }, [cards, searchQuery]);
 
-  // 调用 AI 一键提取闪卡
+  /**
+   * 划选一段原文 → 1 张卡 + 3 个追问（Phase 4）
+   *
+   * 老实现一次给 3 张完整卡、全部直接落库。结果是：你得到 3 张不用动脑的卡，
+   * 而「提取」这个最有效的学习动作被系统代劳了。
+   *
+   * 现在的分工是刻意的：AI 只做 1 张（省事的部分归它），
+   * 另外 3 个追问进候选池，等你回来自己答（费脑的部分归你）。
+   */
   const handleExtractCards = async () => {
-    if (!selectedText || !editor) return;
+    if (!selectedText || !editor || isExtracting) return;
 
     setIsExtracting(true);
     try {
@@ -346,27 +410,48 @@ export default function BrainView() {
       });
 
       if (!response.ok) {
-        throw new Error("请求闪卡提取 API 失败");
+        throw new Error("请求提取接口失败");
       }
 
-      const data = await response.json() as { cards: any[]; isFallback?: boolean };
-      if (!data.cards || data.cards.length === 0) {
-        throw new Error("未提取到任何有效卡片");
+      const data = (await response.json()) as {
+        card?: { front: string; back: string; tags?: string[]; type?: CardType };
+        probes?: string[];
+        fallback?: boolean;
+      };
+
+      if (!data.card?.front || !data.card?.back) {
+        throw new Error("没有拿到可用的卡片");
       }
 
-      const newCards = data.cards.map((c: any) => ({
+      await db.cards.put({
         id: crypto.randomUUID(),
-        front: c.front,
-        back: c.back,
-        tags: c.tags && c.tags.length > 0 ? c.tags : ["AI提取"],
+        front: data.card.front,
+        back: data.card.back,
+        tags: data.card.tags?.length ? data.card.tags : ["AI提取"],
+        type: data.card.type ?? "concept",
         reps: 0,
         interval: 0,
         ease: 2.5,
         nextReview: new Date(),
         createdAt: new Date(),
-      }));
+      });
 
-      await db.cards.bulkAdd(newCards);
+      // 追问进候选池：先和已有的比对去重，再裁到上限（裁掉最旧的）
+      const incoming = buildCandidates(data.probes ?? [], selectedText, Date.now(), () =>
+        crypto.randomUUID(),
+      );
+      if (incoming.length) {
+        const existing = await db.cardCandidates.toArray();
+        const merged = mergeCandidates(existing, incoming);
+        const existingIds = new Set(existing.map((c) => c.id));
+        const fresh = merged.filter((c) => !existingIds.has(c.id));
+        if (fresh.length) await db.cardCandidates.bulkPut(fresh);
+
+        const overflow = pendingCandidates(merged).slice(MAX_POOL_SIZE);
+        if (overflow.length) {
+          await db.cardCandidates.bulkDelete(overflow.map((c) => c.id));
+        }
+      }
 
       // 清除选区，让光标停留在原选区终点
       const { to } = editor.state.selection;
@@ -375,14 +460,16 @@ export default function BrainView() {
 
       setToast({
         show: true,
-        msg: `✨ AI 成功提炼并存入 ${newCards.length} 张记忆卡片！${data.isFallback ? "（已启用本地降级）" : ""}`,
+        msg: `已存 1 张卡${
+          incoming.length ? `，${incoming.length} 个追问进候选池` : ""
+        }${data.fallback ? "（本地提取）" : ""}`,
         type: "success",
       });
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error(err);
       setToast({
         show: true,
-        msg: `❌ 提炼失败：${err.message || "未知错误"}`,
+        msg: `提炼失败：${err instanceof Error ? err.message : "未知错误"}`,
         type: "error",
       });
     } finally {
@@ -390,6 +477,26 @@ export default function BrainView() {
       // 4秒后自动关闭 Toast
       setTimeout(() => setToast((prev) => ({ ...prev, show: false })), 4000);
     }
+  };
+
+  /**
+   * 候选池 → 制卡表单。
+   *
+   * 只填正面（问题），背面留空——答案必须自己写。
+   * 连答案一起预填的话，这张卡就白做了，而且你会以为自己懂了。
+   *
+   * 另外这里**不**把候选标记为已采用：用户可能点了「我来答」就关掉页面，
+   * 那这条追问就凭空蒸发了。真正的出池发生在保存成功的那一刻。
+   */
+  const handleAdoptCandidate = (candidate: CardCandidate) => {
+    setSelectedCardId(null);
+    setFront(candidate.question);
+    setBack("");
+    setTagsInput("");
+    setCardType("concept");
+    setExample("");
+    setAdoptedCandidateId(candidate.id);
+    setBrainSubTab("editor");
   };
 
   // 从 Markdown 或者是 HTML 富文本中提取双向引用的卡片正面标题
@@ -428,6 +535,8 @@ export default function BrainView() {
           back,
           tags,
           linkedCards: linked,
+          type: cardType,
+          example: example.trim(),
         });
       }
     } else {
@@ -437,6 +546,8 @@ export default function BrainView() {
         back,
         tags,
         linkedCards: linked,
+        type: cardType,
+        example: example.trim(),
         reps: 0,
         interval: 0,
         ease: 2.5,
@@ -445,10 +556,18 @@ export default function BrainView() {
       });
     }
 
+    // 保存成功 = 这条追问真的被回答了，这时才移出候选池
+    if (adoptedCandidateId) {
+      await db.cardCandidates.update(adoptedCandidateId, { adopted: true });
+      setAdoptedCandidateId(null);
+    }
+
     setSelectedCardId(null);
     setFront("");
     setBack("");
     setTagsInput("");
+    setCardType("concept");
+    setExample("");
     if (editor) {
       editor.commands.clearContent();
     }
@@ -457,7 +576,7 @@ export default function BrainView() {
 
   // 删除卡片
   const handleDeleteCard = async (id: string) => {
-    if (confirm("确定要删除这张记忆卡片吗？此操作不可撤销。")) {
+    if (confirm("确定删除这张卡？")) {
       await db.cards.delete(id);
       await trackDeletion("cards", id);
       if (selectedCardId === id) {
@@ -637,6 +756,14 @@ export default function BrainView() {
 
     setRfNodes(calculatedRfNodes);
     setRfEdges(calculatedRfEdges);
+    /*
+     * 这里故意只依赖 cards，不依赖 selectedCardId / theme：
+     * 这个 effect 会重跑一遍力导向布局，把节点坐标全部重算。
+     * 选中一张卡只是高亮变了，如果因此重跑布局，用户刚拖好的位置会弹回去。
+     * 高亮由下一个 effect 单独负责（只改 data.isSelected / style，不动 position）。
+     * theme 变化同理——真需要换配色时刷新一次页面，比每次拖拽都抖一下强。
+     */
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cards]);
 
   // 3. 动态控制高亮选中卡片的连线和节点高亮状态，保留用户拖动后的新位置而不会闪烁弹回
@@ -670,7 +797,7 @@ export default function BrainView() {
     );
   }, [selectedCardId, theme, setRfNodes, setRfEdges]);
 
-  const handleReactFlowInit = (instance: any) => {
+  const handleReactFlowInit = (instance: ReactFlowInstance) => {
     setTimeout(() => {
       instance.fitView({ padding: 0.25 });
     }, 100);
@@ -680,15 +807,17 @@ export default function BrainView() {
     <div className="flex-1 flex flex-col md:flex-row overflow-hidden">
       {/* 移动端局部子 Tab 导航栏 (Brain Sub-Tabs) - 仅在小屏 (md以下) 显示 */}
       <div className="flex border-b border-border-subtle bg-surface-1 md:hidden flex-shrink-0">
-        {[
-          { id: "list", label: "卡片列表" },
-          { id: "editor", label: "卡片编辑" },
-          { id: "graph", label: "知识图谱" },
-        ].map((tab) => (
+        {(
+          [
+            { id: "list", label: "卡片列表" },
+            { id: "editor", label: "卡片编辑" },
+            { id: "graph", label: "知识图谱" },
+          ] as { id: "list" | "editor" | "graph"; label: string }[]
+        ).map((tab) => (
           <button
             key={tab.id}
             type="button"
-            onClick={() => setBrainSubTab(tab.id as any)}
+            onClick={() => setBrainSubTab(tab.id)}
             className={`flex-1 py-3 text-xs font-bold border-b-2 transition-all ${
               brainSubTab === tab.id
                 ? "border-primary text-primary"
@@ -704,18 +833,18 @@ export default function BrainView() {
       <div className={`w-full md:w-[280px] bg-surface-2/40 md:border-r border-border-subtle flex flex-col flex-shrink-0 ${
         brainSubTab === "list" ? "flex" : "hidden md:flex"
       }`}>
-        <div className="p-4 border-b border-border-subtle flex flex-col gap-2">
-          <h2 className="text-xs font-bold uppercase tracking-widest text-text-secondary font-mono flex items-center gap-2">
+        <div className="px-4 pt-6 pb-4 border-b border-border-subtle flex flex-col gap-2">
+          <h2 className="section-title flex items-center gap-2">
             <BookOpen className="w-3.5 h-3.5 text-primary" /> 卡片记忆库
           </h2>
           {/* 搜索框 */}
-          <div className="flex items-center gap-2 px-2.5 h-9 rounded-lg bg-surface-1 border border-border-subtle">
+          <div className="flex items-center gap-2 px-2.5 h-9 rounded-[8px] bg-surface-1 border border-border-subtle focus-within:border-primary">
             <Search className="w-3.5 h-3.5 text-neutral-gray" />
             <input
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="搜索正面/反面/标签..."
+              placeholder="搜索正面、反面、标签"
               className="flex-1 bg-transparent border-0 outline-none text-xs text-text-primary placeholder:text-neutral-gray"
             />
           </div>
@@ -760,7 +889,7 @@ export default function BrainView() {
                       e.stopPropagation();
                       handleDeleteCard(card.id);
                     }}
-                    className="absolute right-2 top-3 text-text-secondary hover:text-error opacity-0 group-hover:opacity-100 transition-opacity duration-150"
+                    className="btn btn-xs btn-ghost absolute right-1 top-2 !w-6 !px-0 hover:!text-error opacity-0 group-hover:opacity-100 transition-opacity duration-150"
                   >
                     <Trash2 className="w-3.5 h-3.5" />
                   </button>
@@ -777,7 +906,7 @@ export default function BrainView() {
               setSelectedCardId(null);
               setBrainSubTab("editor"); // 点击新建自动切到编辑
             }}
-            className="w-full flex items-center justify-center gap-2 py-2 rounded-lg bg-surface-1 border border-border-subtle hover:border-primary text-xs font-bold transition-all duration-200 text-text-primary active:scale-95"
+            className="btn btn-sm btn-secondary w-full !border-border-subtle hover:!border-primary"
           >
             <Plus className="w-4 h-4 text-primary" />
             <span>新建记忆卡片</span>
@@ -789,36 +918,77 @@ export default function BrainView() {
       <div className={`flex-1 overflow-y-auto p-4 md:p-6 space-y-6 flex flex-col ${
         brainSubTab === "editor" ? "flex" : "hidden md:flex"
       }`}>
-        <div>
-          <h1 className="text-2xl font-extrabold tracking-tight">第二大脑 (Brain Space)</h1>
-          <p className="text-xs text-text-secondary mt-1">
-            将学到的高价值核心知识提炼为正反面卡片。系统将在后台依据 SM-2 算法进行主动的复习干预。
-          </p>
-        </div>
+        <header>
+          <p className="eyebrow">Brain · Flashcards</p>
+          <h1 className="page-title mt-1">制卡与图谱</h1>
+          <p className="page-sub">一张卡只考一个细节。</p>
+        </header>
 
-        <form onSubmit={handleSaveCard} className="space-y-4 bg-surface-1 border border-border-subtle p-4 md:p-5 rounded-2xl">
-          <h2 className="text-xs font-mono font-bold uppercase tracking-widest text-primary flex items-center gap-1.5">
+        {/* 候选池：AI 出的题（没有答案）。答完才从池子里消失 */}
+        <CandidatePool onAdopt={handleAdoptCandidate} />
+
+        <form onSubmit={handleSaveCard} className="surface-card space-y-4 p-4 md:p-5">
+          <h2 className="text-[11px] font-mono font-bold uppercase tracking-widest text-primary flex items-center gap-1.5">
             <Sparkles className="w-3.5 h-3.5 text-primary" />
-            {selectedCardId ? "编辑卡片 (Edit Card)" : "创建卡片 (Create Card)"}
+            {selectedCardId ? "编辑卡片" : "新建卡片"}
           </h2>
+
+          {/* 新卡当日上限：只提醒，不拦 */}
+          {!selectedCardId && createdToday >= newLimit && (
+            <div className="flex items-start gap-2 p-2.5 rounded-lg bg-amber-500/10 border border-amber-500/25">
+              <AlertTriangle className="w-3.5 h-3.5 text-amber-500 flex-shrink-0 mt-0.5" />
+              <p className="text-[11px] text-text-secondary leading-relaxed">
+                今天已建{" "}
+                <span className="text-amber-500 font-bold">{createdToday}</span>{" "}
+                张（上限 {newLimit}），超出的顺延到明天。
+              </p>
+            </div>
+          )}
 
           <div className="space-y-1.5">
             <label className="text-[10px] uppercase font-bold tracking-widest text-text-secondary font-mono">
-              正面 提示问题 (Front)
+              正面
             </label>
             <textarea
               required
               rows={3}
               value={front}
               onChange={(e) => setFront(e.target.value)}
-              placeholder="提出一个挑战自我的核心提问或要点概念 (支持 Markdown)"
-              className="w-full px-3 py-2 bg-surface-2 rounded-lg border border-border-subtle focus:border-primary text-xs text-text-primary outline-none resize-none font-mono"
+              placeholder="一个具体问题，或一个要点。支持 Markdown"
+              className="field field-area !min-h-[84px] font-mono"
             />
+            {/* 软校验：只提醒，不拦。拦住用户只会让他换个写法绕过去，
+                而「一张卡只考一个细节」这事，提醒一次就够了。 */}
+            {front.length > 0 &&
+              ((front.match(/[?？]/g)?.length ?? 0) > 1 || front.length > 80) && (
+                <p className="text-[10px] text-amber-500 leading-relaxed pt-1">
+                  出现多个问号，或正面太长，说明这是好几张卡。现在拆开。
+                </p>
+              )}
+          </div>
+
+          {/* 题型：交错练习要靠它把概念/面试/错题混排 */}
+          <div className="space-y-1.5">
+            <label className="text-[10px] uppercase font-bold tracking-widest text-text-secondary font-mono">
+              题型
+            </label>
+            <div className="flex gap-2">
+              {CARD_TYPES.map((type) => (
+                <button
+                  key={type}
+                  type="button"
+                  onClick={() => setCardType(type)}
+                  className={`chip flex-1 ${cardType === type ? "chip-active" : ""}`}
+                >
+                  {CARD_TYPE_LABEL[type]}
+                </button>
+              ))}
+            </div>
           </div>
 
           <div className="space-y-1.5">
             <label className="text-[10px] uppercase font-bold tracking-widest text-text-secondary font-mono">
-              背面 核心解答 (Back - 支持 Markdown 与 [[双向链接]])
+              背面
             </label>
             {editor ? (
               <div className="relative">
@@ -828,7 +998,7 @@ export default function BrainView() {
                 {showSuggestions && filteredSuggestions.length > 0 && (
                   <div className="absolute left-3 top-[calc(100%-8px)] z-50 w-64 bg-surface-3 border border-border-subtle rounded-xl p-1.5 shadow-2xl flex flex-col gap-0.5">
                     <span className="text-[9px] text-text-secondary uppercase font-mono tracking-widest px-2 py-1 font-bold">
-                      💡 关联已有卡片
+                      关联已有卡片
                     </span>
                     {filteredSuggestions.map((title, idx) => {
                       const isFocused = idx === suggestionIndex;
@@ -853,34 +1023,34 @@ export default function BrainView() {
                 <div className="mt-2 p-3 bg-surface-2/40 border border-border-subtle/60 rounded-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
                   <div className="flex-1">
                     <span className="text-[10px] text-ai-blue uppercase tracking-widest font-mono font-bold block mb-0.5">
-                      ✨ AI 划词闪卡生成器
+                      划词提取：1 张卡 + 3 个追问
                     </span>
                     <p className="text-[11px] text-text-secondary leading-relaxed">
-                      {selectedText 
-                        ? `已选中 ${selectedText.length} 个字符，点此一键提炼 Q&A 闪卡` 
-                        : "在上方编辑器中用鼠标划词选中段落，AI 将自动提取 1-3 张记忆闪卡"}
+                      {selectedText
+                        ? `已选 ${selectedText.length} 个字符。生成 1 张卡，另 3 个追问进候选池。`
+                        : "先在背面编辑器里划词选中段落。"}
                     </p>
                   </div>
-                  
+
                   <button
                     type="button"
                     disabled={!selectedText || isExtracting}
                     onClick={handleExtractCards}
-                    className={`px-4 py-2 rounded-lg text-[11px] font-bold uppercase tracking-wider flex items-center gap-1.5 transition-all duration-200 relative active:scale-95 ${
+                    className={`btn btn-sm uppercase tracking-wider ${
                       selectedText && !isExtracting
-                        ? "bg-ai-blue text-white shadow-[0_0_15px_rgba(59,130,246,0.3)] hover:scale-[1.02] hover:shadow-[0_0_20px_rgba(59,130,246,0.5)]"
-                        : "bg-surface-3 text-text-secondary cursor-not-allowed"
+                        ? "btn-ai shadow-[0_0_15px_rgba(59,130,246,0.25)]"
+                        : "btn-soft !text-text-secondary"
                     }`}
                   >
                     {isExtracting ? (
                       <>
-                        <div className="w-3 h-3 border-2 border-white/20 border-t-white rounded-full animate-spin" />
-                        <span>提取中...</span>
+                        <div className="w-3 h-3 border-2 border-current/20 border-t-current rounded-full animate-spin" />
+                        <span>提取中…</span>
                       </>
                     ) : (
                       <>
                         <Sparkles className="w-3.5 h-3.5" />
-                        <span>AI 一键提取</span>
+                        <span>提取</span>
                       </>
                     )}
                   </button>
@@ -892,23 +1062,43 @@ export default function BrainView() {
                 rows={6}
                 value={back}
                 onChange={(e) => setBack(e.target.value)}
-                placeholder="编辑器加载中..."
-                className="w-full px-3 py-2 bg-surface-2 rounded-lg border border-border-subtle text-xs text-text-primary outline-none resize-none font-mono"
+                placeholder="加载中…"
+                className="field field-area !min-h-[140px] font-mono"
               />
             )}
           </div>
 
+          {/* 一个例子：手册里「讲得出来」的最低门槛 */}
+          <div className="space-y-1.5">
+            <label className="text-[10px] uppercase font-bold tracking-widest text-text-secondary font-mono flex items-center gap-1.5">
+              例子
+              <span className="text-[9px] font-normal normal-case tracking-normal text-text-secondary/60">
+                选填
+              </span>
+            </label>
+            <textarea
+              rows={2}
+              value={example}
+              onChange={(e) => setExample(e.target.value)}
+              placeholder="比如：ReAct 就像边查地图边走路——先看一眼再迈一步，而不是背完地图才出发。"
+              className="field field-area !min-h-[64px]"
+            />
+            <p className="text-[10px] text-text-secondary/60 leading-relaxed">
+              翻面时一并显示。
+            </p>
+          </div>
+
           <div className="space-y-1.5">
             <label className="text-[10px] uppercase font-bold tracking-widest text-text-secondary font-mono">
-              分类标签 (Tags)
+              标签
             </label>
             <div className="relative">
               <input
                 type="text"
                 value={tagsInput}
                 onChange={(e) => setTagsInput(e.target.value)}
-                placeholder="使用逗号隔开不同标签，例如：AI, Agent, 学习科学"
-                className="w-full pl-8 pr-3 py-2 bg-surface-2 rounded-lg border border-border-subtle focus:border-primary text-xs text-text-primary outline-none font-mono"
+                placeholder="逗号分隔，如：AI, Agent, 学习科学"
+                className="field !pl-8 font-mono"
               />
               <Tag className="w-3.5 h-3.5 text-neutral-gray absolute left-2.5 top-2.5" />
             </div>
@@ -917,9 +1107,9 @@ export default function BrainView() {
           <div className="flex gap-3 pt-2">
             <button
               type="submit"
-              className="flex-1 py-2.5 bg-primary hover:bg-primary-hover text-primary-text transition-all duration-200 rounded-lg text-xs font-bold uppercase tracking-widest active:scale-95"
+              className="btn btn-md btn-primary flex-1 uppercase tracking-widest"
             >
-              {selectedCardId ? "保存修改" : "保存至第二大脑"}
+              {selectedCardId ? "保存修改" : "保存"}
             </button>
             <button
               type="button"
@@ -931,7 +1121,7 @@ export default function BrainView() {
                 if (editor) editor.commands.clearContent();
                 setBrainSubTab("list"); // 取消返回列表
               }}
-              className="px-6 bg-surface-3 hover:bg-surface-2 border border-border-subtle transition-all duration-200 rounded-lg text-xs font-semibold active:scale-95"
+              className="btn btn-md btn-soft"
             >
               取消
             </button>
@@ -943,12 +1133,12 @@ export default function BrainView() {
       <div className={`w-full md:w-[360px] bg-surface-2/40 md:border-l border-border-subtle flex flex-col flex-shrink-0 overflow-hidden ${
         brainSubTab === "graph" ? "flex" : "hidden md:flex"
       }`}>
-        <div className="p-4 border-b border-border-subtle flex flex-col gap-1">
-          <h2 className="text-xs font-bold uppercase tracking-widest text-text-secondary font-mono flex items-center gap-2">
-            <LinkIcon className="w-3.5 h-3.5 text-primary" /> 局部知识网图 (Graph)
+        <div className="px-4 pt-6 pb-4 border-b border-border-subtle flex flex-col gap-1">
+          <h2 className="section-title flex items-center gap-2">
+            <LinkIcon className="w-3.5 h-3.5 text-primary" /> 知识网图
           </h2>
           <p className="text-[10px] text-neutral-gray leading-relaxed">
-            物理斥力模拟。圆圈为卡片，标签为绿色井号 `#`。有共同标签的卡片会相互拉近聚拢。
+            有共同标签的卡片会互相聚拢。
           </p>
         </div>
 
@@ -956,7 +1146,7 @@ export default function BrainView() {
           {rfNodes.length === 0 ? (
             <div className="absolute inset-0 flex flex-col items-center justify-center text-[11px] text-neutral-gray gap-1">
               <HelpCircle className="w-6 h-6 stroke-[1.5]" />
-              <span>暂无网络拓扑数据</span>
+              <span>暂无图谱数据</span>
             </div>
           ) : (
             <ReactFlow

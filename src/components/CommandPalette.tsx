@@ -1,8 +1,8 @@
 "use client";
 
-import React, { useEffect, useState, useRef, useMemo } from "react";
+import React, { useCallback, useEffect, useState, useRef, useMemo } from "react";
 import { useAppStore, AppTab } from "@/lib/store";
-import { db, Habit, Card, trackDeletion } from "@/lib/db";
+import { db, trackDeletion } from "@/lib/db";
 import { useLiveQuery } from "dexie-react-hooks";
 import { AnimatePresence, motion } from "framer-motion";
 import {
@@ -12,10 +12,10 @@ import {
   CheckCircle,
   BookOpen,
   ArrowRight,
-  Sparkles,
   Layers,
   Flame,
   HelpCircle,
+  Repeat,
 } from "lucide-react";
 
 interface CommandPaletteProps {
@@ -43,16 +43,32 @@ export default function CommandPalette({ onTriggerWoopModal }: CommandPalettePro
   const containerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // 从数据库动态拉取习惯与卡片
-  const habits = useLiveQuery(() => db.habits.toArray()) || [];
-  const cards = useLiveQuery(() => db.cards.toArray()) || [];
+  /**
+   * 改搜索词时把高亮归零。
+   *
+   * 原来是一个 `useEffect(..., [search])` 干这件事：先让搜索词变、渲染一轮，
+   * 再在 effect 里把索引改回 0、又渲染一轮。而「结果变短了」的那一帧里，
+   * `commandItems[selectedIndex]` 可能是 undefined —— 回车正好落在这帧就会击空。
+   * 现在改搜索词和归零是同一次事件里的两次 setState，React 会合并成一次渲染，
+   * 中间那一帧不存在了。
+   */
+  const applySearch = useCallback((next: string) => {
+    setSearch(next);
+    setSelectedIndex(0);
+  }, []);
+
+  // 从数据库动态拉取习惯与卡片。同 StatsView：`|| []` 每帧新建空数组，
+  // 会让下面那个 useMemo（搜索结果）每帧重算，拆成两行把引用稳定下来。
+  const habitsRaw = useLiveQuery(() => db.habits.toArray());
+  const cardsRaw = useLiveQuery(() => db.cards.toArray());
+  const habits = useMemo(() => habitsRaw ?? [], [habitsRaw]);
+  const cards = useMemo(() => cardsRaw ?? [], [cardsRaw]);
 
   // 快捷关闭
-  const closePalette = () => {
-    setSearch("");
-    setSelectedIndex(0);
+  const closePalette = useCallback(() => {
+    applySearch("");
     setCommandPaletteOpen(false);
-  };
+  }, [applySearch, setCommandPaletteOpen]);
 
   // 快捷键监听
   useEffect(() => {
@@ -63,7 +79,7 @@ export default function CommandPalette({ onTriggerWoopModal }: CommandPalettePro
     } else {
       document.body.style.overflow = "unset";
     }
-  }, [isCommandPaletteOpen]);
+  }, [isCommandPaletteOpen, closePalette]);
 
   // 监听点击外部关闭
   useEffect(() => {
@@ -78,7 +94,7 @@ export default function CommandPalette({ onTriggerWoopModal }: CommandPalettePro
     return () => {
       document.removeEventListener("mousedown", handleOutsideClick);
     };
-  }, [isCommandPaletteOpen]);
+  }, [isCommandPaletteOpen, closePalette]);
 
   // 核心路由与指令定义
   const commandItems = useMemo(() => {
@@ -86,13 +102,14 @@ export default function CommandPalette({ onTriggerWoopModal }: CommandPalettePro
     const lowerSearch = search.toLowerCase().trim();
 
     // 1. 解析 `/goto` 路由指令
+    // 路由表与 page.tsx 的 5+1 导航保持一致：主路径在前，支撑在后。
     const tabs: { name: string; label: string; icon: React.ReactNode }[] = [
-      { name: "dashboard", label: "今日指挥舱 (Dashboard)", icon: <Flame className="w-4 h-4 text-primary" /> },
-      { name: "flow", label: "专注空间 (Flow Space)", icon: <Zap className="w-4 h-4 text-amber-500" /> },
-      { name: "brain", label: "第二大脑 (Brain)", icon: <BookOpen className="w-4 h-4 text-emerald-500" /> },
-      { name: "coach", label: "AI 辅导舱 (AI Coach)", icon: <Sparkles className="w-4 h-4 text-ai-blue" /> },
-      { name: "stats", label: "复盘看板 (Stats)", icon: <Layers className="w-4 h-4 text-purple-500" /> },
-      { name: "settings", label: "偏好配置 (Settings)", icon: <HelpCircle className="w-4 h-4 text-gray-500" /> },
+      { name: "dashboard", label: "今日", icon: <Flame className="w-4 h-4 text-primary" /> },
+      { name: "review", label: "复习", icon: <Repeat className="w-4 h-4 text-primary" /> },
+      { name: "output", label: "输出", icon: <Zap className="w-4 h-4 text-amber-500" /> },
+      { name: "brain", label: "制卡", icon: <BookOpen className="w-4 h-4 text-emerald-500" /> },
+      { name: "board", label: "看板", icon: <Layers className="w-4 h-4 text-purple-500" /> },
+      { name: "settings", label: "设置", icon: <HelpCircle className="w-4 h-4 text-gray-500" /> },
     ];
 
     if (lowerSearch.startsWith("/goto")) {
@@ -101,8 +118,8 @@ export default function CommandPalette({ onTriggerWoopModal }: CommandPalettePro
         if (!filterStr || tab.label.toLowerCase().includes(filterStr) || tab.name.includes(filterStr)) {
           items.push({
             id: `goto-${tab.name}`,
-            title: `跳转至 ${tab.label}`,
-            subtitle: `页面路由切换`,
+            title: `跳转至${tab.label}`,
+            subtitle: `切换页面`,
             category: "导航",
             icon: tab.icon,
             action: () => {
@@ -123,7 +140,7 @@ export default function CommandPalette({ onTriggerWoopModal }: CommandPalettePro
           items.push({
             id: `habit-${habit.id}`,
             title: `打卡：${habit.name}`,
-            subtitle: `快速勾选习惯并积累能量值 [要求: ${habit.energyDemand}]`,
+            subtitle: `勾选习惯 · 能量 ${habit.energyDemand}`,
             category: "打卡",
             icon: <CheckCircle className="w-4 h-4 text-primary" />,
             action: async () => {
@@ -163,8 +180,8 @@ export default function CommandPalette({ onTriggerWoopModal }: CommandPalettePro
       matchedCards.slice(0, 5).forEach((card) => {
         items.push({
           id: `card-${card.id}`,
-          title: `卡片: ${card.front.substring(0, 40)}${card.front.length > 40 ? "..." : ""}`,
-          subtitle: `正面内容检索 | 标签: ${card.tags.join(", ") || "无"}`,
+          title: `卡片：${card.front.substring(0, 40)}${card.front.length > 40 ? "..." : ""}`,
+          subtitle: `标签：${card.tags.join(", ") || "无"}`,
           category: "记忆卡片",
           icon: <BookOpen className="w-4 h-4 text-ai-blue" />,
           action: () => {
@@ -179,7 +196,7 @@ export default function CommandPalette({ onTriggerWoopModal }: CommandPalettePro
         items.push({
           id: "cmd-woop",
           title: "设定今日意图 (/woop)",
-          subtitle: "开启高效的一天：愿望 (Wish)、结果 (Outcome)、障碍 (Obstacle)、计划 (Plan)",
+          subtitle: "愿望、结果、障碍、应对",
           category: "命令",
           icon: <Zap className="w-4 h-4 text-amber-500" />,
           action: () => {
@@ -190,12 +207,12 @@ export default function CommandPalette({ onTriggerWoopModal }: CommandPalettePro
         
         items.push({
           id: "cmd-review",
-          title: "开启记忆复习 (/review)",
-          subtitle: "基于 SM-2 算法对今日到期卡片进行高能记忆复盘",
+          title: "开始复习 (/review)",
+          subtitle: "复习今日到期卡片（SM-2）",
           category: "命令",
           icon: <BookOpen className="w-4 h-4 text-ai-blue" />,
           action: () => {
-            setActiveTab("flow"); // 跳转至专注页面进行复习
+            setActiveTab("review"); // 复习已经从「专注」里独立出来
             closePalette();
           },
         });
@@ -207,23 +224,23 @@ export default function CommandPalette({ onTriggerWoopModal }: CommandPalettePro
       items.push({
         id: "hint-goto",
         title: "/goto",
-        subtitle: "页面路由快速切换 (如: /goto dashboard)",
+        subtitle: "切换页面 (如 /goto dashboard)",
         category: "命令",
         icon: <ArrowRight className="w-4 h-4 text-gray-400" />,
-        action: () => setSearch("/goto "),
+        action: () => applySearch("/goto "),
       });
       items.push({
         id: "hint-habit",
         title: "/habit",
-        subtitle: "快速完成今日习惯打卡 (如: /habit AI编程)",
+        subtitle: "习惯打卡 (如 /habit AI编程)",
         category: "命令",
         icon: <ArrowRight className="w-4 h-4 text-gray-400" />,
-        action: () => setSearch("/habit "),
+        action: () => applySearch("/habit "),
       });
       items.push({
         id: "hint-woop",
         title: "/woop",
-        subtitle: "快捷创建今日 WOOP 计划",
+        subtitle: "创建今日 WOOP",
         category: "命令",
         icon: <ArrowRight className="w-4 h-4 text-gray-400" />,
         action: () => {
@@ -234,12 +251,7 @@ export default function CommandPalette({ onTriggerWoopModal }: CommandPalettePro
     }
 
     return items;
-  }, [search, habits, cards, setActiveTab, onTriggerWoopModal]);
-
-  // 重置高亮索引，确保搜索改变时不会数组越界
-  useEffect(() => {
-    setSelectedIndex(0);
-  }, [search]);
+  }, [search, habits, cards, setActiveTab, onTriggerWoopModal, applySearch, closePalette]);
 
   // 键盘操作绑定
   useEffect(() => {
@@ -288,8 +300,8 @@ export default function CommandPalette({ onTriggerWoopModal }: CommandPalettePro
                 ref={inputRef}
                 type="text"
                 value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="输入 '/' 唤起指令，或直接搜索卡片与笔记..."
+                onChange={(e) => applySearch(e.target.value)}
+                placeholder="输入 / 唤起指令，或搜索卡片"
                 className="flex-1 h-full text-base bg-transparent border-0 outline-none text-text-primary placeholder:text-neutral-gray"
               />
               <div className="flex items-center gap-1 px-1.5 py-0.5 rounded border border-border-subtle bg-surface-2 text-xs text-neutral-gray font-mono">
@@ -302,7 +314,7 @@ export default function CommandPalette({ onTriggerWoopModal }: CommandPalettePro
             <div className="max-h-[360px] overflow-y-auto py-2">
               {commandItems.length === 0 ? (
                 <div className="px-6 py-12 text-center text-sm text-neutral-gray">
-                  未匹配到相关指令或记忆卡片。
+                  没有匹配的指令或卡片。
                 </div>
               ) : (
                 commandItems.map((item, index) => {
