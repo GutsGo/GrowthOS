@@ -1,162 +1,210 @@
-# 🟢 GrowthOS - 自我驱动型 AI 个人成长操作系统
+# 🟢 GrowthOS
 
-GrowthOS 是一款基于**学习科学（Learning Science）**与 **AI Agent 驱动**的个人成长操作系统。它专为追求高效、自律与深度学习的知识工作者、独立开发者和终身学习者打造。通过**离线优先（Local-first）**架构与沉浸式**暗黑极简设计（Green Deck Styling）**，GrowthOS 确保您的每一次专注、每一个习惯、每一条知识，都能得到数字化的深度沉淀与 AI 的即时反馈。
+**把六种学习方法做成一个每天能跑完的闭环。**
+
+不是又一个待办清单，也不是又一个 AI 聊天框。这是一个「学习操作系统」：从今天该做什么、到复习哪张卡、到怎么把学到的东西讲出来、到一周做一个小项目，全部落在同一条链路上——而且每天的入口只有一个最小动作。
+
+> 设计原则只有一条：**如果一个功能不能回答「今天该干什么」，它就不该出现在首屏。**
 
 ---
 
-## 🎨 系统架构与数据流图 (Mermaid System Architecture)
+## 一、六个方法 ↔ 六个页面
+
+这份代码的骨架就是一张表。每个页面负责一种方法，多一个都不加：
+
+| 方法 | 页面 | 落在哪里 |
+|---|---|---|
+| **间隔重复** | 复习 | 四档 SM-2（忘记 / 困难 / 良好 / 简单），评分按钮上直接印出「下次是几天后」 |
+| **主动回忆** | 复习 | 「先说后看」：翻面前先说一遍答案，语音输入 + LCS 比对给出覆盖率 |
+| **交错练习** | 复习 | 不同题型 / 主题混排，不连着刷同一种（`src/lib/learning/interleave.ts`） |
+| **费曼输出** | 输出 | 三步强制：讲一遍 → 标出卡壳点 → 100 字大白话。讲不通的地方就是要回去补的地方 |
+| **每周复盘** | 看板 | 周日 15 分钟，只问三件事：哪一步真做到了 / 哪一步是伪努力 / 下周只改哪一个变量 |
+| **项目实践** | 看板 | 一周一个可展示的小项目，7 天是硬约束；「难题—解法」记录就是面试故事的原料 |
+
+另有两个支撑页面：**今日**（今天的最小动作 + 能量 + 专注）和**制卡**（把输入变成能问住自己的问题）。
+
+---
+
+## 二、架构
 
 ```mermaid
 graph TD
-    subgraph 客户端 (Local-First Client Layer)
-        UI[React UI - Tailwind & Framer Motion]
-        subgraph 自律心流与反馈 (Gamification & Flow)
-            Clock[番茄钟 & 白噪音]
-            Stats[打卡连击精算 & 6大成就勋章墙]
-            Confetti[Confetti 纸屑爆破动效]
-        end
-        Zustand[Zustand - 全局交互状态流控]
-        subgraph 本地数据库沙箱 (Local DB Sandbox)
-            Dexie[Dexie.js - IndexedDB]
-            Hooks[creating / updating 自动 updatedAt 钩子]
-            DelLog[deletedRecords 物理删除日志表]
-        end
-        SW[Service Worker - PWA 离线静态缓存拦截]
+    subgraph 客户端 Local-First
+        UI[React 19 + Tailwind v4]
+        Zustand[Zustand · 全局状态]
+        Dexie[Dexie.js · IndexedDB · 11 张表]
+        SW[Service Worker · PWA 离线]
     end
 
-    subgraph API 服务层 (Next.js Route Handlers)
-        API_Feynman[/api/feynman - 费曼易懂度评估]
-        API_Chat[/api/chat - 社交话术演练及五维雷达图]
-        API_Extract[/api/extract-cards - AI 划词闪卡自动生成]
-        API_Review[/api/review - 21:00 全天灵魂复盘逼问]
+    subgraph 领域层 纯函数 无 IO
+        SM2[sm2 · 四档调度]
+        Queue[queue · 每日配额]
+        Inter[interleave · 交错排序]
+        Weekly[weekly / projects / feynman]
     end
 
-    subgraph 基础设施 (Cloud & LLM Infrastructure)
-        LLM[OpenAI / DeepSeek 兼容大模型 API]
-        subgraph Supabase 实时云端
-            SupaDB[(PostgreSQL 增量同步表)]
-        end
+    subgraph API Next.js Route Handlers
+        A1[/api/extract-cards · 提取 1 张卡 + 3 个无答案追问/]
+        A2[/api/feynman · 漏讲点 + 术语检测/]
+        A3[/api/exam · 考官两轮追问/]
+        A4[/api/review · 晚间复盘 3 问/]
+        A5[/api/generate-tasks · 能量排程/]
     end
 
-    %% 客户端内部交互
+    subgraph 基础设施
+        LLM[OpenAI / DeepSeek 兼容接口]
+        Supa[(Supabase · LWW 增量同步)]
+    end
+
     UI --> Zustand
-    Zustand <--> Dexie
-    Dexie --> Hooks
-    UI -- 物理删除 --> DelLog
-    SW -. 预缓存/离线拦截 .-> UI
-    Stats -- 达成解锁 --> Confetti
-
-    %% AI 及 API 交互与降级
-    UI -- 1. 大模型 API 请求 --> API 服务层
-    API 服务层 --> LLM
-    UI -. 2. 网络故障 / 无 API KEY 降级 .-> LocalMock[客户端本地 NLP 模拟诊断引擎]
-    LocalMock --> Zustand
-
-    %% LWW 增量同步与物理删除自愈数据流
-    Dexie -- 1. 双向 LWW 时间戳比对 --> SupaDB
-    DelLog -- 2. 物理删除同步 (Delete In Cloud) --> SupaDB
-    SupaDB -- 3. 清空同步成功日志 --> DelLog
+    UI <--> Dexie
+    UI --> 领域层
+    领域层 --> Dexie
+    Dexie <-- 双向 LWW + deletedRecords --> Supa
+    UI --> API
+    API --> LLM
+    API -. 无 Key / 超时 / 解析失败 .-> 本地降级
 ```
 
----
-
-## 🚀 核心设计哲学 (Design Philosophy)
-
-1. **离线优先 (Local-first) & 零摩擦**
-   - 所有的核心数据（习惯、卡片、笔记、能量）首先保存在本地 IndexedDB（通过 Dexie.js 强力驱动）。即使在断网、弱网、甚至不配置云端密钥的情况下，系统也能在秒级加载并闭环运行。
-2. **键盘驱动 (Keyboard-driven) 极客操作**
-   - 核心交互手段为 `Cmd+K` 全局命令面板。无需频繁使用鼠标，通过 `/woop`（设定意图）、`/habit`（打卡）、`/goto`（路由跳转）等结构化命令瞬间执行操作。
-3. **Green Deck 极简美学 (Spotify Green x AI Blue)**
-   - 全局 Dark Mode 暗黑模式，高亮组件采用 Spotify 翠绿 (`#1DB954`)，AI 相关组件与气泡采用极客深蓝 (`#3b82f6`)。辅以 Framer Motion 的三维景深旋转、卡片滑入过渡和粒子撒花效果，带来极致的情绪价值与“爽感”反馈。
-4. **大模型 API 优雅降级机制**
-   - 即使 LLM 接口受限或无网络，系统会检测并自动切换为本地 NLP 模拟器，保证演示环境的绝对稳定性与鲁棒性。
-5. **增量双向 LWW 冲突合并自愈**
-   - 采用 Last-Write-Wins (LWW) 对比 `updatedAt` 时间戳进行自愈合并，并使用本地物理删除日志 `deletedRecords` 对云端执行清理，避免数据由于离线错乱而在同步时被拉回。
+**分层纪律**：`src/lib/learning/` 全是纯函数，不 import Dexie、不读时钟（时间一律从参数传入）。所以调度、队列、交错、复盘这些逻辑都能用 `node --test` 直接跑，不需要浏览器。
 
 ---
 
-## 💎 核心功能矩阵 (Feature Matrix)
+## 三、快速开始
 
-### 1. 今日指挥舱与习惯心流
-- **WOOP 意图设定**：每日首次冷启动加载 800ms 后强制弹出 WOOP 意图设定（Wish, Outcome, Obstacle, Plan），引导用户克服行动摩擦力。
-- **能量高亮推荐**：每日自由滑动能量滑块（1-10 分），系统根据当前能量水平（高/中/低）自动对习惯卡片给予绿色发光高亮推荐。
-- **原子习惯打卡 Confetti**：点击习惯打卡成功时，Check 环绕区会向外喷射 15 个 Spotify Green 粒子的物理扩散散射撒花动效。
-- **番茄钟与白噪音**：集成 15/25/45m 专注倒计时、Web Audio API 归零报警蜂鸣、系统级 Web Notification 推送通知，并内置 HTML5 极简双通道白噪音播放器。
-- **打卡连击精算与 6 大成就勋章**：时区自适应精算出 Current Streak 与 Max Streak。设计并渲染了破土萌芽、烈火淬炼、傲视群雄、能量掌控者、记忆大师、社交博弈王等 6 大极客风成就勋章墙，达成瞬间抛洒 confetti 粒子彩屑。
-
-### 2. 第二大脑与间隔重复
-- **自研 SM-2 算法复习卡片**：手写标准 SM-2 间隔重复算法，结合 3D 景深翻转（backface-hidden 加固）手势，支持 1/3/5 分评级，智能自动递推下次复习天数。
-- **Zettelkasten 笔记与物理拓扑图谱**：基于 TipTap 实时 Markdown 富文本编辑器编写卡片，支持 `[[双向链接]]` 正则匹配，并使用 SVG 物理力导向（Euler 物理学公式）在 Brain 面板中绘制动态连线拓扑图。
-- **AI 闪卡提取器**：选中笔记段落即可一键触发大模型，自动将文本智能切碎并提炼为 3 张 Anki 标准格式的记忆闪卡保存。
-
-### 3. AI 教练深度注入
-- **费曼判官 (FlowView)**：用大白话输出您所理解的技术或概念，大模型将以“小白易懂度”给您评出 0-100 分，并指出里面的专业术语及提供趣味生活类比。
-- **社交演练 (CoachView)**：扮演特定性格人设与您发起多回合对话，并最终根据“情绪价值”、“需求理解”和“幽默度”进行量化图表打分，生成五维 SVG 蛛网雷达图。
-- **21:00 定时灵魂复盘**：每晚 21:00 定时触发。后台自动打包用户的习惯、专注、能量等数据，由 AI 生成 3 个针锋相对、极其犀利的复盘问题，用户回答并归档以形成反馈环。
-
----
-
-## 🛠️ 数据库 Schema 配置 (Supabase PostgreSQL)
-
-如果您需要开通云端备份与数据同步，我们已将完整的建表 SQL 脚本抽离并保存在独立迁移文件中：
-👉 **[supabase/migrations/20260525000000_init_sync_tables.sql](file:///Users/alien/Documents/codes/GrowthOS/supabase/migrations/20260525000000_init_sync_tables.sql)**
-
-### 初始化步骤：
-1. 登录您的 [Supabase](https://supabase.com/) 控制台，进入您的项目空间；
-2. 打开左侧菜单的 **SQL Editor**，新建一个查询；
-3. 将上述 [20260525000000_init_sync_tables.sql](file:///Users/alien/Documents/codes/GrowthOS/supabase/migrations/20260525000000_init_sync_tables.sql) 文件中的全部 SQL 脚本复制并粘贴进 SQL Editor 中；
-4. 点击 **Run** 执行，即可在数据库中自动创建用于多端增量同步的 `supabase_habits`、`supabase_habit_logs`、`supabase_cards` 与 `supabase_daily_records` 四张核心表。
-
----
-
-## ⚙️ 本地开发与部署运行 (Getting Started)
-
-### 1. 本地克隆并安装依赖
-确保您已在本地安装了 [pnpm](https://pnpm.io/)，然后运行：
 ```bash
-# 复制并配置环境变量
-cp .env.local.example .env.local
-
-# 安装依赖
 pnpm install
-
-# 启动开发服务器
+cp .env.local.example .env.local   # 没有这个文件就手动建
 pnpm dev
 ```
 
-### 2. 环境变量配置 (`.env.local`)
-若要启动真实的 AI API 请求与 Supabase 云同步，请在本地 `.env.local` 写入您的密钥：
+### 环境变量
+
+AI 与云同步都是**可选**的：不配也能完整跑（本地降级 + IndexedDB）。
+
 ```env
-# 大模型 API 配置 (支持 OpenAI/DeepSeek 等标准 API 协议)
-NEXT_PUBLIC_OPENAI_API_KEY="your_api_key_here"
-NEXT_PUBLIC_OPENAI_BASE_URL="https://api.deepseek.com/v1" # 或 https://api.openai.com/v1
-NEXT_PUBLIC_OPENAI_MODEL="deepseek-chat" # 或 gpt-4o 等
+# ---- 大模型：配任意一组即可。DeepSeek 优先 ----
+DEEPSEEK_API_KEY="sk-..."
+DEEPSEEK_API_BASE_URL="https://api.deepseek.com/v1"   # 可选
+DEEPSEEK_MODEL="deepseek-chat"                        # 可选
 
-# Supabase 云端同步配置
-NEXT_PUBLIC_SUPABASE_URL="your_supabase_project_url"
-NEXT_PUBLIC_SUPABASE_ANON_KEY="your_supabase_anon_key"
+OPENAI_API_KEY="sk-..."
+OPENAI_API_BASE_URL="https://api.openai.com/v1"       # 可选
+OPENAI_MODEL="gpt-4o-mini"                            # 可选
+
+# ---- Supabase 云同步（可选）----
+NEXT_PUBLIC_SUPABASE_URL="https://xxx.supabase.co"
+NEXT_PUBLIC_SUPABASE_ANON_KEY="..."
+
+# ---- 访问密码（可选，设了就会拦一层）----
+SITE_PASSWORD="..."
 ```
 
-### 3. 生产打包与验证
+> ⚠️ 注意：这些是**服务端变量**，没有 `NEXT_PUBLIC_` 前缀。加前缀会把密钥打进客户端包。
+> 早期版本这里写错过一次，结果是「配了 Key、调用永远降级」，而日志里只有一句 `调用失败`。
+
+### 验证
+
 ```bash
-# 本地生产环境构建
-pnpm build
-
-# 运行构建产物
-pnpm start
+pnpm typecheck    # tsc --noEmit
+pnpm test         # 351 个用例 + 覆盖率 + 五道闸门
+pnpm run check    # typecheck + lint + test，提交前跑这个
+pnpm build        # 生产构建
 ```
-
-### 4. 部署至 Vercel
-直接点击 Vercel 的导入按钮，关联您的 GitHub 项目仓库，并在 Environment Variables 中填入上面的三个大模型和两个 Supabase 环境变量，即可实现秒级一键部署上线！
 
 ---
 
-## 💡 求职包装与技术难点呈现 (Resume Bullet Points)
+## 四、工程质量
 
-如果您在简历上呈现本项目，可以参考以下技术亮点描述：
+| 项 | 现状 |
+|---|---|
+| 测试 | **351 个用例 / 31 个文件 / 0 失败**（`node --test`，Node 22 原生跑 TS，无 jest / vitest） |
+| 必测模块 | 31 个（`src/lib/**`、`src/app/api/**/route.ts`、`src/middleware.ts`）**全部被执行** |
+| 行覆盖 | 97%（口径：被加载过的源码） |
+| 类型 | `tsc --noEmit` 0 error |
+| Lint | 0 problem |
+| 构建 | 11 个路由 |
 
-- **离线优先 (Local-first) 架构与双向 LWW 自愈同步**：采用 Next.js 16 + Zustand + Dexie.js (IndexedDB) 实现了响应式本地离线优先架构。设计并实现了一套基于 **Last-Write-Wins (LWW)** 时间戳比对的双向增量合并引擎，并在本地构建 `deletedRecords` 物理删除日志表，实现离线物理删除动作同步至云端 Supabase PostgreSQL，同步完成后物理清空本地删除日志，保证数据离线自愈可用。
-- **手写 SM-2 遗忘曲线算法与 3D 景深渲染**：基于 TypeScript 原生实现了 SM-2 间隔重复算法，负责拟合简易度因子（Ease Factor）与遗忘间隔天数的动态推导。在前端利用 CSS3D 景深技术加固了卡片的 backface-visibility 物理翻转效果，交互延时低于 16ms。
-- **TipTap 富文本引擎与物理力导向拓扑**：集成了 TipTap 实现了 Markdown 实时富文本编辑器。通过定制解析器在卡片保存时正则提取 `[[被引用卡片]]`，利用 SVG 结合物理动力学摩擦系数与拉力公式，动态渲染卡片间的双向引用物理网络关系。
-- **基于标准 API 的 Tool Calling 与故障降级设计**：不依赖三方 Agent 框架，直接利用 Next.js API Routes 对接 OpenAI 标准协议，并基于客户端自研了针对网络抖动或无 API Key 场景下的 NLP 降级模拟机制，保证了系统作为产品的弹性可用率（Reliability）达到 99.9%。
-- **PWA Service Worker 离线机制与 LCP 调优**：编写 SW 拦截逻辑实现静态资源离线预缓存与 Stale-While-Revalidate 自愈更新，并仅在非开发环境（生产环境）注册。在 layout 阶段通过 next/font 实现 Google Fonts 的零阻碍水合，使 Largest Contentful Paint (LCP) 降低了 40%。
+测试分三层：
+
+1. **纯函数**——SM-2 四档间隔、新卡配额、队列去重、交错排布、LCS 相似度、AI 返回结构的归一化。改一行看不出坏的地方。
+2. **路由集成**——真的 route handler + 真的 provider，只有最后一跳 `fetch` 是假的。于是「网关不认 json 模式」「模型把 JSON 包在 ``` 里」「没配 Key」都变成了可构造的输入，而不是只在上线后才遇到。
+3. **数据层**——真的 Dexie + 内存版 IndexedDB，包括一次真的 **v3→v5 迁移**：先造一个带脏数据的老库，再让新版接管，验证数据是被修好了而不是被丢了。
+
+`pnpm test` 不只是 `node --test` 的壳，它还拦四种「看起来是绿的」情况：找不到任何测试文件、用例数跌破下限、某个模块从没被任何用例加载过、行覆盖率跌破下限。最后一条是关键——覆盖率只统计跑过的文件，从没被 import 的模块在报告里根本不存在，而报告照样显示 100%。
+
+细节见 [`contexts/test-strategy.md`](contexts/test-strategy.md)。
+
+---
+
+## 五、几个刻意的设计决定
+
+这些是写这个项目时真正花时间想的部分。
+
+**1. 新卡限额是唯一的可调旋钮。**
+一次导入几百张卡然后弃坑，是最常见的死法。所以队列不是「所有到期的一起上」，而是「到期全给 + 新卡按配额放行，其余顺延到明天」。配额默认 2，上限 20。
+
+**2. 「困难」档必须严格短于「良好」。**
+第一版按标准 SM-2 算，`困难` 在某些状态下会算出和 `良好` 一样的间隔，甚至把卡钉死在 1 天。这会训练用户「选困难没意义，不如选简单」。现在困难档的公式保证：严格短于良好，且每次复习都比上次长。
+
+**3. AI 只做一张卡，剩下的必须由人完成。**
+`/api/extract-cards` 不会一次吐 3 张成品卡。它给 1 张卡 + 3 个追问，而**追问只有问题没有答案**——因为「带答案的追问」会被系统当成一张卡，等于又把提取这个动作交回给机器。
+
+**4. 费曼的分数是脚注，不是主角。**
+一屏最显眼的位置放一个 85 分，人看完只会记住 85。所以主产物是「你没讲到的 2 点」和「你用了但没解释的术语」，分数降为可选字段——模型不给就是 `null`，前端不许编一个。
+
+**5. 日志和卡片在同一个事务里写。**
+评分只更新 `cards` 的话，热力图永远只能拿习惯打卡凑数。`reviewEvents` 是 append-only 的事件流，是统计的唯一真实数据源；两者要么都成功，要么都不写。
+
+**6. 交错排序用「分桶轮询」而不是「相邻就换」。**
+后者在 `AABB` 上很漂亮，在 `AAABBBCCC` 上会剩三张 C 连排——局部修补看不到全局解。现在每取一张都从「剩余最多、且不同于上一张」的桶里取，`abcabcabc` 零相邻。
+
+---
+
+## 六、目录
+
+```
+src/
+├── app/
+│   ├── page.tsx              # 单页壳 + 6 tab 导航
+│   └── api/                  # 5 个业务路由 + auth + uploadthing
+├── components/
+│   ├── today/                # 今日：门禁、WOOP、能量、习惯、专注、晚间复盘
+│   ├── review/               # 复习：卡片、回忆面板、评分条、考官、小结
+│   ├── output/               # 输出：讲 → 标卡壳 → 100 字
+│   ├── brain/                # 制卡：候选池（AI 追问）
+│   └── board/                # 看板：项目、周复盘、统计
+└── lib/
+    ├── learning/             # 领域层（纯函数，全部有单测）
+    │   ├── sm2.ts queue.ts interleave.ts review.ts
+    │   ├── feynman.ts weekly.ts projects.ts exam.ts
+    │   └── db 适配层 adapters.ts review-store.ts use-daily-queue.ts
+    ├── ai/                   # provider（统一调用 + 降级）、contract（返回结构归一化）
+    └── db.ts                 # Dexie schema + 版本迁移（v1 → v5）
+```
+
+---
+
+## 七、已知限制
+
+写在这里而不是藏起来：
+
+- **同步只覆盖 4 张表**（habits / cards / dailyRecords / habitLogs）。`reviewEvents`、`projects`、`weeklyReviews` 目前只在本地。跨设备看复习统计会缺数据。
+- **考官的对话内容不落库**。两轮追问的记录只在当屏有效，评完就没了。
+- **UI 没有真人可用性测试**。所有验证都是编译、类型、单测、接口降级——这些能证明它不崩，不能证明它好用。
+- **AI 依赖外部网络**。无 Key 时全部走本地降级（本地提取 / 本地追问 / 本地术语检测），功能可用但不是真 AI。
+
+---
+
+## 八、部署
+
+任意支持 Node 18+ 的平台（Vercel 最省事）。两个注意点：
+
+1. 环境变量按上面的名字配，别加 `NEXT_PUBLIC_` 前缀；
+2. 如果要开云同步，先在 Supabase SQL Editor 跑 `supabase/migrations/` 下的建表脚本。
+
+---
+
+## License
+
+MIT
